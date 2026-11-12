@@ -45,7 +45,7 @@ public class AuthController {
         AuthenticationService.LoginResult result = authentication.login(request.identifier(), request.password(), request.rememberMe());
         JwtTokenService.IssuedToken token = result.token();
         ResponseCookie.ResponseCookieBuilder cookie = ResponseCookie.from(SecurityConfig.AUTH_COOKIE, token.value())
-                .httpOnly(true).secure(secureCookie).sameSite("Strict").path("/api");
+    .httpOnly(true).secure(true).sameSite("None").path("/api");
         if (token.rememberMe()) cookie.maxAge(Duration.ofDays(7));
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookie.build().toString())
@@ -59,19 +59,43 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<Void> logout(HttpServletRequest request) {
-        String token = null;
-        Cookie[] cookies = request.getCookies();
-        if (cookies != null) {
-            for (Cookie cookie : cookies) {
-                if (SecurityConfig.AUTH_COOKIE.equals(cookie.getName())) token = cookie.getValue();
+public ResponseEntity<Void> logout(HttpServletRequest request) {
+    String token = null;
+
+    Cookie[] cookies = request.getCookies();
+
+    if (cookies != null) {
+        for (Cookie cookie : cookies) {
+            if (SecurityConfig.AUTH_COOKIE.equals(cookie.getName())) {
+                token = cookie.getValue();
             }
         }
-        authentication.logout(token);
-        ResponseCookie expired = ResponseCookie.from(SecurityConfig.AUTH_COOKIE, "")
-                .httpOnly(true).secure(secureCookie).sameSite("Strict").path("/api").maxAge(Duration.ZERO).build();
-        return ResponseEntity.noContent().cacheControl(CacheControl.noStore()).header(HttpHeaders.SET_COOKIE, expired.toString()).build();
     }
+
+    authentication.logout(token);
+
+    ResponseCookie expired = ResponseCookie
+            .from(SecurityConfig.AUTH_COOKIE, "")
+            .httpOnly(true)
+            .secure(true)
+            .sameSite("None")
+            .path("/api")
+            .maxAge(Duration.ZERO)
+            .build();
+
+    return ResponseEntity.noContent()
+            .header(HttpHeaders.SET_COOKIE, expired.toString())
+            .header(HttpHeaders.CACHE_CONTROL, "no-store")
+            .build();
+}
+        ResponseCookie expired = ResponseCookie.from(SecurityConfig.AUTH_COOKIE, "")
+    .httpOnly(true)
+    .secure(true)
+    .sameSite("None")
+    .path("/api")
+    .maxAge(Duration.ZERO)
+    .build();
+}
 
     @ExceptionHandler({BadCredentialsException.class, DisabledException.class})
     public ResponseEntity<Map<String, String>> invalidCredentials() {
