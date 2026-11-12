@@ -121,10 +121,12 @@ public class SecurityConfig {
         };
     }
 
+    // The SPA reads the token from the GET /api/auth/csrf response body (it cannot read this cross-site cookie) and
+    // echoes it in X-XSRF-TOKEN; the browser must also send the cookie back, hence the shared cross-site attributes.
     @Bean
-    CookieCsrfTokenRepository csrfTokenRepository(@Value("${app.security.cookie-secure:true}") boolean secureCookie) {
+    CookieCsrfTokenRepository csrfTokenRepository(AuthCookies authCookies) {
         CookieCsrfTokenRepository repository = CookieCsrfTokenRepository.withHttpOnlyFalse();
-        repository.setCookieCustomizer(cookie -> cookie.path("/").sameSite("Strict").secure(secureCookie));
+        repository.setCookieCustomizer(cookie -> authCookies.apply(cookie.path("/")));
         return repository;
     }
 

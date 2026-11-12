@@ -1,5 +1,6 @@
 package com.wildlife.controller;
 
+import com.wildlife.config.AuthCookies;
 import com.wildlife.config.SecurityConfig;
 import com.wildlife.service.AuthenticationService;
 import com.wildlife.service.JwtTokenService;
@@ -9,7 +10,6 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.CacheControl;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
@@ -27,12 +27,11 @@ import java.util.Map;
 @RequestMapping("/api/auth")
 public class AuthController {
     private final AuthenticationService authentication;
-    private final boolean secureCookie;
+    private final AuthCookies authCookies;
 
-    public AuthController(AuthenticationService authentication,
-                          @Value("${app.security.cookie-secure:true}") boolean secureCookie) {
+    public AuthController(AuthenticationService authentication, AuthCookies authCookies) {
         this.authentication = authentication;
-        this.secureCookie = secureCookie;
+        this.authCookies = authCookies;
     }
 
     @GetMapping("/csrf")
@@ -44,8 +43,7 @@ public class AuthController {
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
         AuthenticationService.LoginResult result = authentication.login(request.identifier(), request.password(), request.rememberMe());
         JwtTokenService.IssuedToken token = result.token();
-        ResponseCookie.ResponseCookieBuilder cookie = ResponseCookie.from(SecurityConfig.AUTH_COOKIE, token.value())
-    .httpOnly(true).secure(true).sameSite("None").path("/api");
+        ResponseCookie.ResponseCookieBuilder cookie = authCookies.auth(token.value());
         if (token.rememberMe()) cookie.maxAge(Duration.ofDays(7));
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookie.build().toString())
@@ -59,43 +57,20 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-public ResponseEntity<Void> logout(HttpServletRequest request) {
-    String token = null;
-
-    Cookie[] cookies = request.getCookies();
-
-    if (cookies != null) {
-        for (Cookie cookie : cookies) {
-            if (SecurityConfig.AUTH_COOKIE.equals(cookie.getName())) {
-                token = cookie.getValue();
+    public ResponseEntity<Void> logout(HttpServletRequest request) {
+        String token = null;
+        Cookie[] cookies = request.getCookies();
+        if (cookies != null) {
+            for (Cookie cookie : cookies) {
+                if (SecurityConfig.AUTH_COOKIE.equals(cookie.getName())) token = cookie.getValue();
             }
         }
+        authentication.logout(token);
+        return ResponseEntity.noContent()
+                .cacheControl(CacheControl.noStore())
+                .header(HttpHeaders.SET_COOKIE, authCookies.expiredAuth().toString())
+                .build();
     }
-
-    authentication.logout(token);
-
-    ResponseCookie expired = ResponseCookie
-            .from(SecurityConfig.AUTH_COOKIE, "")
-            .httpOnly(true)
-            .secure(true)
-            .sameSite("None")
-            .path("/api")
-            .maxAge(Duration.ZERO)
-            .build();
-
-    return ResponseEntity.noContent()
-            .header(HttpHeaders.SET_COOKIE, expired.toString())
-            .header(HttpHeaders.CACHE_CONTROL, "no-store")
-            .build();
-}
-        ResponseCookie expired = ResponseCookie.from(SecurityConfig.AUTH_COOKIE, "")
-    .httpOnly(true)
-    .secure(true)
-    .sameSite("None")
-    .path("/api")
-    .maxAge(Duration.ZERO)
-    .build();
-}
 
     @ExceptionHandler({BadCredentialsException.class, DisabledException.class})
     public ResponseEntity<Map<String, String>> invalidCredentials() {

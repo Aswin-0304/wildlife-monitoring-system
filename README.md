@@ -5,7 +5,7 @@ React + Vite dashboard, Spring Boot 3.3.5 REST API, and MySQL. The sample system
 ## Authentication
 
 - Spring Security authenticates usernames or email addresses with BCrypt (work factor 12).
-- The API issues signed JWT access tokens in `HttpOnly`, `SameSite=Strict` cookies. The frontend never stores the access token in local or session storage.
+- The API issues signed JWT access tokens in `HttpOnly` cookies. The frontend never stores the access token in local or session storage. With `AUTH_COOKIE_SECURE=true` (HTTPS, required in production because the frontend and API are on different sites) the auth and CSRF cookies are `Secure; SameSite=None`; local HTTP development (`AUTH_COOKIE_SECURE=false`) keeps `SameSite=Strict`.
 - Mutating API requests require a CSRF token obtained from `GET /api/auth/csrf` and sent as `X-XSRF-TOKEN`.
 - Access tokens last 2 hours by default or 7 days when “Remember this device” is selected. Logout revokes the active token in the database.
 - `ADMIN` can use all workspace routes and `/api/admin/**`. `FOREST_OFFICER` can use monitoring, detections, alerts, cameras, and analytics; admin pages and admin endpoints are denied.
