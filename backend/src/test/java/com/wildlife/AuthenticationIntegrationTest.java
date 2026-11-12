@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wildlife.entity.UserAccount;
 import com.wildlife.entity.UserRole;
+import com.wildlife.repository.RevokedJwtRepository;
 import com.wildlife.repository.UserAccountRepository;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
@@ -54,6 +55,7 @@ class AuthenticationIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper mapper;
     @Autowired UserAccountRepository users;
+    @Autowired RevokedJwtRepository revokedTokens;
     @Autowired PasswordEncoder passwordEncoder;
 
     @BeforeEach
@@ -231,6 +233,32 @@ class AuthenticationIntegrationTest {
         mvc.perform(get("/api/admin/users").cookie(admin.authCookie)).andExpect(status().isUnauthorized());
         // Logout keeps its CSRF protection.
         mvc.perform(post("/api/auth/logout").cookie(admin.authCookie)).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void dashboardSignOutRevokesTheJwtAndEndsTheSession() throws Exception {
+        Login admin = login("field-admin", true);
+        mvc.perform(get("/api/dashboard/stats").cookie(admin.authCookie)).andExpect(status().isOk());
+        long revokedBefore = revokedTokens.count();
+
+        // The SPA's sign-out: fetch a fresh CSRF token while signed in, then POST /logout with both cookies and the header.
+        MvcResult csrfResult = mvc.perform(get("/api/auth/csrf").header("Origin", FRONTEND_ORIGIN).cookie(admin.authCookie, admin.csrf.cookie))
+                .andExpect(status().isOk()).andReturn();
+        String token = mapper.readTree(csrfResult.getResponse().getContentAsString()).get("token").asText();
+        assertEquals(admin.csrf.token, token, "an existing XSRF-TOKEN cookie is reused, so the header and cookie match");
+        MvcResult logout = mvc.perform(post("/api/auth/logout").header("Origin", FRONTEND_ORIGIN)
+                        .cookie(admin.authCookie, admin.csrf.cookie).header("X-XSRF-TOKEN", token))
+                .andExpect(status().isNoContent())
+                .andExpect(header().string("Access-Control-Allow-Origin", FRONTEND_ORIGIN))
+                .andExpect(header().string("Access-Control-Allow-Credentials", "true"))
+                .andReturn();
+        assertTrue(attributes(setCookie(logout, "ZOVIVE_AUTH")).containsAll(List.of("Max-Age=0", "Path=/api", "HttpOnly", "Secure", "SameSite=None")));
+
+        // The JWT is revoked server-side, so even a browser that kept the cookie cannot reach protected routes.
+        assertEquals(revokedBefore + 1, revokedTokens.count());
+        for (String path : new String[]{"/api/auth/me", "/api/dashboard/stats", "/api/admin/users"}) {
+            mvc.perform(get(path).cookie(admin.authCookie)).andExpect(status().isUnauthorized());
+        }
     }
 
     @Test

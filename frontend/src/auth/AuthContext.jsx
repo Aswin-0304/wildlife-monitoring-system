@@ -32,8 +32,7 @@ export function AuthProvider({ children }) {
   // One server logout at a time; a second click (or a sign-in) joins the request already in flight.
   const serverLogout = useCallback(() => {
     if (!logoutRef.current) {
-      // The API skips CSRF checks for requests that carry the auth cookie and drops the CSRF cookie on the first
-      // authenticated call, so the token cached at page load is stale by now: always start logout with a fresh one.
+      // Logout is CSRF-protected: start from a freshly fetched token so it always matches the current XSRF-TOKEN cookie.
       resetCsrf();
       logoutRef.current = authApi.logout()
         .then(() => { storage.clear(); return true; })
@@ -68,17 +67,23 @@ export function AuthProvider({ children }) {
     }
   }, [serverLogout]);
 
-  const signOut = useCallback(() => {
-    // Local session ends immediately and unconditionally; the server call can finish (or fail) in the background.
-    // The protected layout unmounts in the same render (no dashboard frame), and the login entry replaces the current
-    // history entry; any protected entry reached with Back is redirected before it renders (user is null).
+  const signOut = useCallback(async () => {
+    // The marker is written before the request, so a reload or another tab can never restore this session meanwhile,
+    // and the epoch bump discards any /me response still in flight.
     epochRef.current += 1;
     storage.set();
     markSignedOut(true);
+    // Wait (with the Sign out button in its loading state) for the server to revoke the JWT and expire the HttpOnly
+    // cookie. If it cannot be reached in time the marker stays: the session still ends here, is never restored from the
+    // cookie, and the server logout is retried on the next page load or when the connection returns.
+    const confirmed = await serverLogout();
+    // The protected layout unmounts in the same render, and the login entry replaces the current history entry; any
+    // protected entry reached with Back is redirected before it renders (user is null).
+    epochRef.current += 1;
     setUser(null);
     setArrivalTransition(false);
     navigate('/login', { replace: true, state: { signedOut: true } });
-    return serverLogout();
+    return confirmed;
   }, [navigate, serverLogout]);
 
   useEffect(() => {
