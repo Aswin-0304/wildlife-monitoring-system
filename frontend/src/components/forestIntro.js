@@ -452,6 +452,7 @@ function buildPlan(st, clips) {
   };
   add('trunk_plant', tPush - tArrive, (u) => holdPose(u, smoothstep(0, 1, u)), 'TrunkPlant');
   ev(tDetach, 'ropeDetach');
+  ev(tDetach + 0.25, 'ropeGone');                         // a quarter second after it comes off, the rope is gone
   ev(time, 'release', { root: 'B' });
   add('trunk_push', Tk, (u) => {
     const tau = u * Tk;
@@ -642,6 +643,7 @@ function stepParticles(list, dt, S) {
 export function createIntro(stageIn, { settled = false, clips = {} } = {}) {
   let st = stageIn, plan = null, t = 0, evIndex = 0, finished = false;
   let roots = null, held = null, rope = null;
+  let ropeGone = false;   // once the rope is gone (after the release, or the intro skipped) nothing of it shows again
   const particles = [];
   let rand = seeded(5);
   let focus = null, pointer = null, pointerT = -10;
@@ -652,7 +654,7 @@ export function createIntro(stageIn, { settled = false, clips = {} } = {}) {
 
   function setup(next) {
     st = next; t = 0; evIndex = 0; finished = false; particles.length = 0; rand = seeded(5);
-    emitAcc = { grit: 0, dust: 0, streak: 0 }; cardSkip = null; held = null; rope = null;
+    emitAcc = { grit: 0, dust: 0, streak: 0 }; cardSkip = null; held = null; rope = null; ropeGone = false;
     plan = st.mode === 'none' ? null : buildPlan(st, clips);
     roots = plan ? makeRoots() : null;
   }
@@ -660,7 +662,7 @@ export function createIntro(stageIn, { settled = false, clips = {} } = {}) {
     if (!plan) { finished = true; return; }
     t = plan.tIdle + 0.01; evIndex = plan.events.length; finished = true; particles.length = 0;
     held = null; roots = makeRoots();
-    rope = makeFreeRope(t);   // skipped intro / reduced motion: the rope hangs from the card's ring, not clipped to her
+    rope = null; ropeGone = true;   // skipped intro / reduced motion / a later visit: no rope (it is gone once she is seated)
   }
 
   const segIndex = (time) => {
@@ -813,20 +815,6 @@ export function createIntro(stageIn, { settled = false, clips = {} } = {}) {
     c.pts.forEach((p) => { p.px = p.x; p.py = p.y; });
     return rope0;
   }
-  // Unclipped (after she reaches the trunk, or when the intro is skipped): the rope hangs from the card's ring down its
-  // right side and lies on the forest floor, its coil taking in the spare length.
-  function makeFreeRope(time) {
-    const a = ringAt(time), n = 44, r = 0.012 * st.S;
-    const len = Math.max(0.6 * st.S, floorY() - a[1] + 0.3 * st.S);
-    const pts = Array.from({ length: n }, (_, i) => ({ x: a[0] + r + 0.002 * st.S * Math.sin(i), y: a[1] + (len * i) / (n - 1) }));
-    const c = makeChain(pts, len / (n - 1));
-    const rope0 = { chain: c, n, mode: 'free', len, t0: time, hold: null, box: cardBox(time), r };
-    rope0.collide = (ch) => collideBox(ch, rope0.box, rope0.r, null);
-    c.pins.set(0, { x: a[0], y: a[1] });
-    for (let k = 0; k < 240; k += 1) stepChain(c, 1 / 240, st.g, 0.94, 10, 0.3, floorY(), 0, rope0.collide);
-    c.pts.forEach((p) => { p.px = p.x; p.py = p.y; });
-    return rope0;
-  }
   // The rope stays clipped to her harness until she reaches the trunk, and to the card's ring the whole time. Her hip coil pays
   // out and takes in rope: before the tow it trails with plenty of slack; under the tow it runs straight (around the card's
   // corner when she is below its top); afterwards it keeps a light sag. It drapes over the card, never across it.
@@ -834,7 +822,7 @@ export function createIntro(stageIn, { settled = false, clips = {} } = {}) {
     if (!rope) return;
     const c = rope.chain, n = rope.n;
     if (rope.mode === 'free') {
-      // Free end: it springs back and swings down, then hangs from the ring; the spare length is taken in slowly.
+      // Free end (for the quarter second before it disappears): it springs back towards the ring and starts to fall.
       const a = ringAt(time);
       c.pins.clear(); c.pins.set(0, { x: a[0], y: a[1] });
       rope.box = cardBox(time);
@@ -886,6 +874,7 @@ export function createIntro(stageIn, { settled = false, clips = {} } = {}) {
         break;
       case 'cardStop': cardBurst('stop'); break;
       case 'ropeSlack': if (rope) rope.mode = 'slack'; break;
+      case 'ropeGone': rope = null; ropeGone = true; break;   // the whole rope, its ring and her hip coil go; nothing recreates them
       case 'ropeDetach':
         // Unclipped from her harness: the free end recoils towards the card's ring (a quick snap back), then falls.
         if (rope) {
@@ -1032,6 +1021,7 @@ export function createIntro(stageIn, { settled = false, clips = {} } = {}) {
       roots: roots ? roots.view : [],
       card: { dx: off.dx, dy: off.dy, moving: !!plan && (off.dx !== 0 || off.dy !== 0) },
       rope: rope ? { pts: chainPoints(rope.chain), mode: rope.mode, ring: ringAt(time), clipped: rope.mode !== 'free' } : null,
+      ropeGone,
     };
   }
 

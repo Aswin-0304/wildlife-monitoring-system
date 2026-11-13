@@ -489,6 +489,7 @@ export default function LoginCanopyScene({ cardRef, reducedMotion, skipIntro = f
     // backpack and binoculars; Phase 6 if it cannot load). Downloaded once per page session; the same instance is reused
     // when the login page mounts again.
     let actor = null;
+    let ropeCoil = [], ropeCoilShown = true;
     loadRangerModel().then((gltf) => {
       if (disposed) return;
       actor = getRangerActor(gltf, { anisotropy: Math.min(frontRenderer.capabilities.getMaxAnisotropy(), 4) });
@@ -523,6 +524,9 @@ export default function LoginCanopyScene({ cardRef, reducedMotion, skipIntro = f
       });
       // Both pairs of sunglasses off, so her eyes (and where she looks) can be seen.
       actor.meshes.forEach((mesh) => { if (/Aviators|Sunglasses/.test(mesh.material?.name || '')) mesh.visible = false; });
+      // The green rope coil on her hip (the rope pays out from it): hidden together with the rope once it is gone.
+      ropeCoil = actor.meshes.filter((m) => /(^|_)Rope$/.test(m.material?.name || ''));
+      ropeCoil.forEach((m) => { m.visible = true; });   // the same character is reused on a later visit: start shown
       actor.setVisible(false);
       frontScene.add(actor.root);
       ready.actor = true;
@@ -926,6 +930,8 @@ export default function LoginCanopyScene({ cardRef, reducedMotion, skipIntro = f
       driveActor(frame.actor, stage, frame, fdt);
       drawShadows(frame.actor, stage, frame.card);
       drawRope(frame.rope, stage.S, actorState.harness, actorState.k);
+      // Once the rope is gone (a quarter second after it comes off her, or the intro skipped) her hip coil goes too.
+      if (ropeCoil.length && ropeCoilShown === !!frame.ropeGone) { ropeCoilShown = !frame.ropeGone; ropeCoil.forEach((m) => { m.visible = ropeCoilShown; }); }
       // The trunk is never drawn over the card.
       const c = stage.card;
       trunkMaterial.uniforms.uCard.value.set(c.left + frame.card.dx, c.top + frame.card.dy, c.right + frame.card.dx, c.bottom + frame.card.dy);
