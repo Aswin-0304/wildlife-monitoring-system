@@ -65,7 +65,7 @@ export default function LoginPage() {
   };
 
   return <main className={`auth-login-screen ${introComplete ? 'auth-arrived' : 'auth-warming'} ${reducedMotion ? 'auth-reduced-motion' : ''}`}>
-    <img className="auth-forest-plate" src="/images/forest-banyan-backdrop.png" alt="" aria-hidden="true" />
+    <img className="auth-forest-plate" src="/images/forest-banyan-backdrop-zovive.png" alt="" aria-hidden="true" />
     <Suspense fallback={null}><LoginCanopyScene cardRef={cardRef} reducedMotion={reducedMotion} skipIntro={skipIntro} onCardReveal={revealCard} onComplete={finishArrival} /></Suspense>
     <div className="auth-forest-shade"/>
     <div className="auth-forest-grain" aria-hidden="true"/>

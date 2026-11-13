@@ -27,46 +27,87 @@ const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); retu
 
 // ---------------------------------------------------------------- textures
 
-// Fibrous banyan bark: long twisting fibres, dark crevices, lichen and moss. Tiles in both directions.
+// Fibrous banyan bark, shared by the 3D roots, the limb, rootlets and moss (so they read as the painted tree's bark):
+// braided fibre bundles separated by deep grooves, a lit ridge along each bundle (light from the upper left), fine
+// irregular fibres, weathering cracks, lichen and a little moss. Tiles in both directions. The ZOVIVE banyan palette
+// (the same one the painted trunk, branches and roots are graded to): aged bark #585038, warm bark #605840, grooves
+// #484830, charcoal-olive #505048, muted olive #686850, raised bark #787860, natural highlights #888870, deep shadows
+// #28281E, subtle moss #506848.
 function barkTextures() {
-  const width = 256, height = 512, rand = seeded(7);
+  const width = 512, height = 1024, rand = seeded(7), TAU = Math.PI * 2;
   const colour = document.createElement('canvas'); colour.width = width; colour.height = height;
   const bump = document.createElement('canvas'); bump.width = width; bump.height = height;
   const c = colour.getContext('2d'), b = bump.getContext('2d');
-  const base = c.createLinearGradient(0, 0, width, 0);
-  base.addColorStop(0, '#7b6a55'); base.addColorStop(0.3, '#958067'); base.addColorStop(0.55, '#7f6c56');
-  base.addColorStop(0.8, '#9a8466'); base.addColorStop(1, '#7b6a55');
-  c.fillStyle = base; c.fillRect(0, 0, width, height);
-  b.fillStyle = '#777'; b.fillRect(0, 0, width, height);
-  const fibre = (ctx, x, w, style, wobble) => {
-    for (const shift of [-width, 0, width]) {
-      ctx.strokeStyle = style; ctx.lineWidth = w; ctx.beginPath();
-      ctx.moveTo(x + shift, -8);
-      for (let y = 0; y <= height + 8; y += 32) ctx.lineTo(x + shift + Math.sin(y * 0.021 + x) * wobble + Math.sin(y * 0.063 + x * 2.1) * wobble * 0.4, y);
+  const rgba = (hex, a) => `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(hex.slice(3, 5), 16)},${parseInt(hex.slice(5, 7), 16)},${a})`;
+  c.fillStyle = '#585038'; c.fillRect(0, 0, width, height);
+  b.fillStyle = '#6a6a6a'; b.fillRect(0, 0, width, height);
+  // weathering: broad soft strips of the palette's bark tones
+  const tones = ['#505048', '#605840', '#686850', '#484830', '#585038'];
+  for (let i = 0; i < 18; i += 1) {
+    const x = rand() * width, w = 24 + rand() * 80, col = tones[Math.floor(rand() * tones.length)];
+    for (const sx of [-width, 0, width]) {
+      const g = c.createLinearGradient(x + sx - w / 2, 0, x + sx + w / 2, 0);
+      g.addColorStop(0, rgba(col, 0)); g.addColorStop(0.5, rgba(col, 0.5)); g.addColorStop(1, rgba(col, 0));
+      c.fillStyle = g; c.fillRect(x + sx - w / 2, 0, w, height);
+    }
+  }
+  // a fibre's centre line down the texture: periodic in y (k whole waves per tile) so it tiles seamlessly
+  const stroke = (ctx, style, w, x0, amp, k, ph) => {
+    ctx.strokeStyle = style; ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const sx of [-width, 0, width]) {
+      ctx.beginPath();
+      for (let y = -16; y <= height + 16; y += 8) {
+        const u = (y / height) * TAU;
+        const x = sx + x0 + Math.sin(u * k + ph) * amp + Math.sin(u * (k * 3 + 1) + ph * 1.7) * amp * 0.3;
+        if (y === -16) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
       ctx.stroke();
     }
   };
-  for (let i = 0; i < 70; i += 1) {
-    const x = rand() * width, w = 1.5 + rand() * 3.5;
-    fibre(c, x, w, `rgba(48,36,24,${0.28 + rand() * 0.3})`, 3 + rand() * 6);
-    fibre(b, x, w, 'rgba(10,10,10,.7)', 3 + rand() * 6);
+  // braided fibre bundles (later ones cross over earlier ones): deep groove either side, body, lit ridge, shaded side
+  for (let i = 0; i < 18; i += 1) {
+    const x0 = rand() * width, w = 26 + rand() * 38, amp = 6 + rand() * 18, k = 1 + Math.floor(rand() * 3), ph = rand() * TAU;
+    const body = ['#585038', '#605840', '#505048', '#686850', '#585038'][Math.floor(rand() * 5)];
+    stroke(c, rgba('#28281E', 0.8), w + 6, x0, amp, k, ph); stroke(b, 'rgba(8,8,8,0.92)', w + 6, x0, amp, k, ph);
+    stroke(c, rgba(body, 0.96), w, x0, amp, k, ph); stroke(b, 'rgba(150,150,150,1)', w, x0, amp, k, ph);
+    stroke(c, rgba('#484830', 0.5), w * 0.28, x0 + w * 0.3, amp, k, ph); stroke(b, 'rgba(96,96,96,0.7)', w * 0.28, x0 + w * 0.3, amp, k, ph);
+    stroke(c, rgba('#787860', 0.42), w * 0.34, x0 - w * 0.2, amp, k, ph); stroke(b, 'rgba(215,215,215,0.9)', w * 0.34, x0 - w * 0.2, amp, k, ph);
+    stroke(c, rgba('#888870', 0.22), w * 0.12, x0 - w * 0.28, amp, k, ph); stroke(b, 'rgba(240,240,240,0.85)', w * 0.12, x0 - w * 0.28, amp, k, ph);
   }
+  // fine irregular fibres
+  for (let i = 0; i < 260; i += 1) {
+    const x0 = rand() * width, amp = 2 + rand() * 10, k = 1 + Math.floor(rand() * 4), ph = rand() * TAU, w = 0.6 + rand() * 1.4, light = rand() > 0.5;
+    stroke(c, light ? rgba('#888870', 0.1 + rand() * 0.14) : rgba('#28281E', 0.25 + rand() * 0.25), w, x0, amp, k, ph);
+    stroke(b, light ? 'rgba(230,230,230,0.35)' : 'rgba(20,20,20,0.45)', w, x0, amp, k, ph);
+  }
+  // weathering cracks across the fibres
   for (let i = 0; i < 160; i += 1) {
-    const x = rand() * width, w = 0.8 + rand() * 2.4, light = rand();
-    const tone = light > 0.65 ? `rgba(206,184,146,${0.3 + rand() * 0.3})` : light > 0.3 ? `rgba(150,120,84,${0.3 + rand() * 0.3})` : `rgba(70,54,36,${0.25 + rand() * 0.25})`;
-    fibre(c, x, w, tone, 2 + rand() * 7);
-    fibre(b, x, w, `rgba(235,235,235,${0.25 + light * 0.45})`, 2 + rand() * 7);
+    const x = rand() * width, y = rand() * height, l = 3 + rand() * 11, dy = (rand() - 0.5) * 5, w = 0.8 + rand() * 1.2;
+    for (const [ctx, style] of [[c, rgba('#28281E', 0.55)], [b, 'rgba(10,10,10,0.8)']]) {
+      ctx.strokeStyle = style; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + l, y + dy); ctx.stroke();
+    }
   }
-  for (let i = 0; i < 22; i += 1) {
-    const x = rand() * width, y = rand() * height, r = 6 + rand() * 26, moss = rand() > 0.25;
+  // weathering: darker charcoal / groove-toned mottling and faint moss staining, as on the painted trunk
+  for (let i = 0; i < 40; i += 1) {
+    const x = rand() * width, y = rand() * height, r = 20 + rand() * 60, kind = rand();
+    const col = kind < 0.45 ? '#28281E' : kind < 0.8 ? '#484830' : '#506848', a = kind < 0.45 ? 0.32 : kind < 0.8 ? 0.4 : 0.3;
     for (const sx of [-width, 0, width]) for (const sy of [-height, 0, height]) {
       const g = c.createRadialGradient(x + sx, y + sy, 0, x + sx, y + sy, r);
-      g.addColorStop(0, moss ? 'rgba(112,140,52,.62)' : 'rgba(176,170,128,.34)'); g.addColorStop(1, 'rgba(112,140,52,0)');
+      g.addColorStop(0, rgba(col, a)); g.addColorStop(1, rgba(col, 0));
       c.fillStyle = g; c.fillRect(x + sx - r, y + sy - r, r * 2, r * 2);
     }
   }
-  for (let i = 0; i < 900; i += 1) {
-    c.fillStyle = rand() > 0.5 ? 'rgba(40,30,20,.3)' : 'rgba(222,196,150,.22)';
+  // lichen and a little moss
+  for (let i = 0; i < 26; i += 1) {
+    const x = rand() * width, y = rand() * height, r = 8 + rand() * 30, moss = rand() > 0.4;
+    for (const sx of [-width, 0, width]) for (const sy of [-height, 0, height]) {
+      const g = c.createRadialGradient(x + sx, y + sy, 0, x + sx, y + sy, r);
+      g.addColorStop(0, moss ? rgba('#506848', 0.38) : rgba('#888870', 0.22)); g.addColorStop(1, rgba('#506848', 0));
+      c.fillStyle = g; c.fillRect(x + sx - r, y + sy - r, r * 2, r * 2);
+    }
+  }
+  for (let i = 0; i < 1400; i += 1) {
+    c.fillStyle = rand() > 0.5 ? rgba('#28281E', 0.32) : rgba('#888870', 0.2);
     c.fillRect(rand() * width, rand() * height, 1 + rand() * 1.5, 1 + rand() * 3);
   }
   const make = (canvas, srgb) => {
@@ -79,27 +120,61 @@ function barkTextures() {
   return { map: make(colour, true), bump: make(bump, false) };
 }
 
-// Green kernmantle trekking rope: a braided sheath (two interleaved helices) with darker and lighter yarns.
-function ropeTexture() {
-  const width = 64, height = 256, rand = seeded(19);
-  const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#3aa73f'; ctx.fillRect(0, 0, width, height);
-  for (let dir = -1; dir <= 1; dir += 2) {
-    for (let k = -8; k < 24; k += 1) {
-      const y0 = k * 16;
-      for (let shift = -width; shift <= width; shift += width) {
-        ctx.strokeStyle = (k + (dir > 0 ? 0 : 1)) % 3 === 0 ? 'rgba(206,250,120,.7)' : (k % 2 ? 'rgba(20,82,30,.55)' : 'rgba(110,200,80,.5)');
-        ctx.lineWidth = 5;
-        ctx.beginPath(); ctx.moveTo(shift, y0); ctx.lineTo(shift + width, y0 + dir * 22); ctx.stroke();
-      }
-    }
+// Braided kernmantle climbing rope (sheath of interwoven strands, 2-over-2 twill): u runs round the rope, v along it.
+// Palette: main base #8FAE68, dark strands #536B3E, olive strands #718C4F, light strands #B9C98A, highlight fibres
+// #D5DDB0, grooves #34482F. Each strand is shaded across its width (rounded), with fine fibres along it; the same
+// strand profile gives the normal map, so the braid catches the light as relief, not as a painted pattern.
+const ROPE_COLOURS = { base: '#8FAE68', dark: '#536B3E', olive: '#718C4F', light: '#B9C98A', fibre: '#D5DDB0', groove: '#34482F' };
+function ropeTextures() {
+  const W = 128, H = 256, N = 8, K = 4;                    // 8 strands each way round the rope; K turns per texture repeat
+  const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+  const C = Object.fromEntries(Object.entries(ROPE_COLOURS).map(([k, v]) => [k, hex(v)]));
+  const famA = [C.base, C.dark, C.base, C.olive, C.light, C.base, C.dark, C.olive];
+  const famB = [C.olive, C.base, C.light, C.base, C.dark, C.olive, C.base, C.light];
+  const colour = document.createElement('canvas'); colour.width = W; colour.height = H;
+  const normal = document.createElement('canvas'); normal.width = W; normal.height = H;
+  const ci = colour.getContext('2d').createImageData(W, H), ni = normal.getContext('2d').createImageData(W, H);
+  const height = new Float32Array(W * H), rand = seeded(23);
+  const noise = new Float32Array(W * H).map(() => rand());
+  for (let y = 0; y < H; y += 1) for (let x = 0; x < W; x += 1) {
+    const u = x / W, v = y / H;
+    const pa = (u + v * K) * N, pb = (u - v * K) * N + N * 8;
+    const ia = Math.floor(pa), ib = Math.floor(pb), fa = pa - ia, fb = pb - ib;
+    const aTop = ((ia + ib) >> 1) % 2 === 0;               // 2-over-2 twill: which strand is on top here
+    const f = aTop ? fa : fb, idx = (aTop ? ia : ib) % N;
+    const prof = Math.sin(Math.PI * f);                    // rounded strand: bright crown, dark edges
+    const base = aTop ? famA[idx] : famB[idx];
+    // fine fibres along the strand (direction follows the strand's helix)
+    const along = aTop ? (u - v * K) : (u + v * K);
+    const fib = Math.sin((along * 90 + noise[(y * W + x)] * 0.6) * Math.PI) > 0.86 ? 1 : 0;
+    const groove = Math.pow(1 - prof, 3);
+    let r = base[0], g = base[1], b = base[2];
+    const shade = 0.72 + 0.38 * prof;
+    r *= shade; g *= shade; b *= shade;
+    const gw = Math.min(1, groove * 1.15); r += (C.groove[0] - r) * gw; g += (C.groove[1] - g) * gw; b += (C.groove[2] - b) * gw;
+    const fw = fib * 0.35 * prof; r += (C.fibre[0] - r) * fw; g += (C.fibre[1] - g) * fw; b += (C.fibre[2] - b) * fw;
+    const n0 = (noise[(y * W + x)] - 0.5) * 10; r += n0; g += n0; b += n0;
+    const o = (y * W + x) * 4;
+    ci.data[o] = clamp(r, 0, 255); ci.data[o + 1] = clamp(g, 0, 255); ci.data[o + 2] = clamp(b, 0, 255); ci.data[o + 3] = 255;
+    height[y * W + x] = Math.pow(prof, 0.7) * (aTop ? 1 : 0.92) + fib * 0.04;
   }
-  for (let i = 0; i < 260; i += 1) { ctx.fillStyle = rand() > 0.5 ? 'rgba(10,40,18,.35)' : 'rgba(210,250,180,.25)'; ctx.fillRect(rand() * width, rand() * height, 1.5, 2.5); }
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
+  for (let y = 0; y < H; y += 1) for (let x = 0; x < W; x += 1) {
+    const hL = height[y * W + ((x - 1 + W) % W)], hR = height[y * W + ((x + 1) % W)];
+    const hU = height[((y - 1 + H) % H) * W + x], hD = height[((y + 1) % H) * W + x];
+    let nx = (hL - hR) * 2.2, ny = (hU - hD) * 2.2, nz = 1;
+    const l = Math.hypot(nx, ny, nz); nx /= l; ny /= l; nz /= l;
+    const o = (y * W + x) * 4;
+    ni.data[o] = (nx * 0.5 + 0.5) * 255; ni.data[o + 1] = (ny * 0.5 + 0.5) * 255; ni.data[o + 2] = (nz * 0.5 + 0.5) * 255; ni.data[o + 3] = 255;
+  }
+  colour.getContext('2d').putImageData(ci, 0, 0); normal.getContext('2d').putImageData(ni, 0, 0);
+  const make = (canvas, srgb) => {
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    texture.anisotropy = 4;
+    return texture;
+  };
+  return { map: make(colour, true), normal: make(normal, false) };
 }
 
 // Mask of the banyan trunk in the backdrop (white = trunk), soft-edged.
@@ -397,25 +472,58 @@ export default function LoginCanopyScene({ cardRef, reducedMotion, skipIntro = f
     trunkMatte.renderOrder = 60; trunkMatte.frustumCulled = false; trunkMatte.visible = false; frontScene.add(trunkMatte);
 
     const bark = barkTextures(); disposables.push(bark.map, bark.bump);
-    const rootMaterial = new THREE.MeshStandardMaterial({ map: bark.map, bumpMap: bark.bump, bumpScale: 2.2, color: '#ffffff', roughness: 0.92, metalness: 0, vertexColors: true, transparent: true });
-    const rootletMaterial = new THREE.MeshStandardMaterial({ map: bark.map, color: '#d6a46a', roughness: 1, metalness: 0, vertexColors: true });
-    const mossMaterial = new THREE.MeshStandardMaterial({ color: '#73893c', roughness: 1, metalness: 0, vertexColors: true, transparent: true });
-    const ropeTex = ropeTexture(); disposables.push(ropeTex);
-    const ropeMaterial = new THREE.MeshStandardMaterial({ map: ropeTex, color: '#ffffff', roughness: 0.62, metalness: 0, vertexColors: true, transparent: true });
+    const rootMaterial = new THREE.MeshStandardMaterial({ map: bark.map, bumpMap: bark.bump, bumpScale: 4, color: '#ffffff', roughness: 0.92, metalness: 0, vertexColors: true, transparent: true });
+    // (rootlets: the same bark, a touch lighter — raised, weathered; moss: the palette's subtle #506848)
+    const rootletMaterial = new THREE.MeshStandardMaterial({ map: bark.map, color: '#d2d2c2', roughness: 1, metalness: 0, vertexColors: true });
+    const mossMaterial = new THREE.MeshStandardMaterial({ color: '#506848', roughness: 1, metalness: 0, vertexColors: true, transparent: true });
+    // The painted banyan is unlit, but these 3D parts are lit by the back scene's dim canopy light (and tone mapped),
+    // which pressed the palette bark almost to black (#0E1307 measured on the new limb). This gain on the shared bark
+    // materials, plus the per-part tints below, makes the lit bark land on the painted tree's colours on screen. The
+    // master is the painted trunk and thick horizontal roots (measured before the card arrives, all four sizes: painted
+    // horizontal roots #4E5037-#515539, trunk #454D31-#4C5534; 3D roots #484B32-#4A4C33, 3D limb #4B4F38-#50553E;
+    // at equal brightness, L65-85, all within +-3 of #4A4D35). The moss uses the same bark map, tinted towards #506848.
+    const BARK_GAIN = [7.18, 6.28, 8.8];
+    rootMaterial.color.setRGB(...BARK_GAIN);
+    rootletMaterial.color.multiply(new THREE.Color().setRGB(...BARK_GAIN));
+    mossMaterial.map = bark.map;
+    mossMaterial.color.setRGB(6.0, 7.5, 9.1);
+    // the hanging roots face the key light more squarely than the limb: a little darker so they sit with the painted roots
+    const ROOT_TINT = 0.86;
+    // the limb lies across the warm key light (the roots hang facing the cooler sky fill): a slightly cooler tint so its
+    // rendered bark lands on the same colour as the painted trunk and roots
+    const LIMB_TINT = [0.88, 0.93, 0.9];
+    const ropeTex = ropeTextures(); disposables.push(ropeTex.map, ropeTex.normal);
+    // Matte braided nylon: rough, no sheen of plastic; the braid's relief comes from the normal map.
+    const ropeMaterial = new THREE.MeshStandardMaterial({ map: ropeTex.map, normalMap: ropeTex.normal, normalScale: new THREE.Vector2(0.9, 0.9), color: '#ffffff',
+      roughness: 0.86, metalness: 0, envMapIntensity: 0.35, vertexColors: true, transparent: true });
 
     // The banyan roots (three twisted strands each, hairy rootlets), growing out of the painted branch, behind the glass:
     // the one she jumps for, the one by the card's corner, and thinner ones around them.
     const ROOTLETS = [{ at: 0.12, len: 0.07, side: 1 }, { at: 0.3, len: 0.1, side: -1 }, { at: 0.55, len: 0.12, side: 1 }, { at: 0.8, len: 0.08, side: -1 }, { at: 1.15, len: 0.14, side: 1 }, { at: 1.6, len: 0.1, side: -1 },
       { at: 2.1, len: 0.26, side: 1, moss: true }, { at: 2.7, len: 0.16, side: -1 }, { at: 3.3, len: 0.22, side: -1, moss: true }, { at: 3.9, len: 0.12, side: 1 }, { at: 4.6, len: 0.18, side: -1 }];
     const rootMeshes = Array.from({ length: 6 }, (_, k) => ({
-      strands: [0, 1, 2].map((i) => createTube(scene, k < 2 ? 150 : 60, i ? 7 : (k < 2 ? 12 : 8), rootMaterial, -5.4 - k * 0.03 - i * 0.01, 2)),
+      // braided strands: five on the two main roots, four on the thinner ones
+      strands: (k < 2 ? [0, 1, 2, 3, 4] : [0, 1, 2, 3]).map((i) => createTube(scene, k < 2 ? 150 : 60, i ? 7 : (k < 2 ? 12 : 8), rootMaterial, -5.4 - k * 0.03 - i * 0.008, 2)),
       rootlets: (k < 2 ? ROOTLETS : ROOTLETS.slice(0, 5)).map((spec) => ({ ...spec, mesh: createTube(scene, 10, 5, spec.moss ? mossMaterial : rootletMaterial, -5.36 - k * 0.03, 2) })),
     }));
-    // The green trekking rope, its shadow, and the carabiner clipped to the card.
-    const ropeMesh = createTube(frontScene, 72, 7, ropeMaterial, -0.08, 18);
+    // The climbing rope (one tube; after it breaks, one tube per half), its shadows, and the anchor on the card.
+    const ropeShadowMaterial = new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0.3, depthWrite: false });
+    const ropeMesh = createTube(frontScene, 72, 10, ropeMaterial, -0.08, 18);
     ropeMesh.visible = false;
-    const ropeShadow = createTube(frontScene, 72, 5, new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0.3, depthWrite: false }), -0.1, 17);
+    const ropeShadow = createTube(frontScene, 72, 5, ropeShadowMaterial, -0.1, 17);
     ropeShadow.visible = false;
+    const ropeMesh2 = createTube(frontScene, 40, 10, ropeMaterial, -0.08, 18); ropeMesh2.visible = false;
+    const ropeShadow2 = createTube(frontScene, 40, 5, ropeShadowMaterial, -0.1, 17); ropeShadow2.visible = false;
+    // A living limb growing out of the banyan trunk at the right (behind the glass, like the roots; its base disappears
+    // behind the painted trunk): wide screens, she lands on it, runs up it and springs from its tip onto the card.
+    const limbMesh = createTube(scene, 48, 14, rootMaterial, -5.2, 3); limbMesh.visible = false;
+    // its soft shadow on the forest behind, and a strip of moss along its top (as on the painted branches)
+    const limbShadow = createTube(scene, 48, 8, new THREE.MeshBasicMaterial({ color: '#28281E', transparent: true, opacity: 0.4, depthWrite: false }), -5.3, 2);
+    limbShadow.visible = false;
+    const limbMoss = createTube(scene, 24, 8, mossMaterial, -5.17, 4); limbMoss.visible = false;
+    const limbTwigs = [0.32, 0.55, 0.78].map((at, i) => ({ at, len: [0.16, 0.24, 0.12][i], mesh: createTube(scene, 10, 5, rootletMaterial, -5.18, 3) }));   // bark rootlets (a green one read as a blade of grass)
+    limbTwigs.forEach((tw) => { tw.mesh.visible = false; });
+    const limbPath = makePath(28), limbBuf = Array.from({ length: 28 }, () => ({ x: 0, y: 0 }));
     const steel = new THREE.MeshStandardMaterial({ color: '#c9ccc4', roughness: 0.32, metalness: 0.75, transparent: true });
     // The anchor on the card's right border: a bolt hanger plate fixed to the border, and a steel ring through it that
     // the rope is tied to (the ring hangs out from the border, so the rope leaves it clear of the card).
@@ -480,7 +588,9 @@ export default function LoginCanopyScene({ cardRef, reducedMotion, skipIntro = f
       texture.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 8);
       disposables.push(texture); onLoad(texture);
     }, undefined, () => onLoad(null));
-    loadTexture('/images/forest-banyan-backdrop.png', (texture) => {
+    // The backdrop with the banyan (trunk, branches, hanging roots) graded to the ZOVIVE bark palette (the original
+    // painting is kept as forest-banyan-backdrop.png).
+    loadTexture('/images/forest-banyan-backdrop-zovive.png', (texture) => {
       if (texture) { backgroundMaterial.uniforms.map.value = texture; trunkMaterial.uniforms.map.value = texture; background.visible = true; trunkMatte.visible = true; }
       ready.bg = true;
     });
@@ -578,8 +688,11 @@ export default function LoginCanopyScene({ cardRef, reducedMotion, skipIntro = f
     };
     const trunkOnScreen = () => onScreen(TRUNK_EDGE);
 
-    const strandShape = [{ r: 0.86, o: 0.0, pitch: 1.0, start: 0 }, { r: 0.36, o: 0.62, pitch: 1.55, start: 0 }, { r: 0.24, o: 0.7, pitch: 0.95, start: 0.35 }];
-    // The banyan root along its simulated chain: three twisted strands, irregular woody girth, a frayed tip.
+    // Braided aerial root: a thick core that wanders a little off-centre, and strands of different girth that wind round
+    // it at different (and varying) pitches, splitting away and fusing again, some ending part-way down.
+    const strandShape = [{ r: 0.8, o: 0.14, pitch: 2.6, start: 0 }, { r: 0.42, o: 0.62, pitch: 1.5, start: 0 }, { r: 0.28, o: 0.72, pitch: 0.95, start: 0.35 },
+      { r: 0.33, o: 0.66, pitch: 1.2, start: 0.12 }, { r: 0.21, o: 0.8, pitch: 0.8, start: 0.55 }];
+    // The banyan root along its simulated chain: braided strands, irregular woody girth, a frayed tip.
     const tmpP = { x: 0, y: 0, tx: 0, ty: 0 }, cP = { x: 0, y: 0, tx: 0, ty: 0 };
     function drawRoot(rootMesh, pts0, h, time, rs = 1) {
       // Continue the root a little up into the branch, fading in, so it grows out of the bark rather than starting at it.
@@ -609,12 +722,15 @@ export default function LoginCanopyScene({ cardRef, reducedMotion, skipIntro = f
           const s = t * length, fromEnd = length - s, f = fromEnd / scale;
           const node = ((f + 0.31 * index) % 1.37) - 0.68;
           const lumps = 1 + 0.15 * Math.sin(f * 2.3 + index * 2.1) + 0.08 * Math.sin(f * 5.3 + 1.7 + index) + 0.03 * Math.sin(f * 15.1 + index * 4.0) + 0.16 * Math.exp(-(node * node) / 0.0035);
+          // the whole root swells and narrows slowly along its length (subtle, different on every root)
+          const swell = 1 + 0.12 * Math.sin(f * 0.42 + rs * 7.3) + 0.06 * Math.sin(f * 1.13 + rs * 3.1);
           const tip = 0.4 + 0.6 * smoothstep(0, 0.25 * scale, fromEnd);
           const collar = 1 + 0.75 * Math.exp(-Math.max(0, s - into) / (0.09 * scale));   // the root flares where it leaves the branch
-          const bundle = (tipR + (baseR - tipR) * Math.max(0, 1 - s / (6 * h))) * lumps * tip * collar;
+          const bundle = (tipR + (baseR - tipR) * Math.max(0, 1 - s / (6 * h))) * lumps * swell * tip * collar;
           const splay = 1 + 0.8 * (1 - smoothstep(0, 0.12 * scale, fromEnd));
-          const wander = (f / shape.pitch) * Math.PI * 2 + index * 2.4 + 1.6 * Math.sin(f * 0.8 + index * 1.7) + 0.6 * Math.sin(f * 2.9 + index);
-          const separate = 0.8 + 0.45 * Math.max(0, Math.sin(f * 0.7 + index * 1.9));
+          // the twist tightens and loosens along the root; strands now and then split away from the bundle and fuse again
+          const wander = (f / shape.pitch) * Math.PI * 2 * (1 + 0.22 * Math.sin(f * 0.31 + index * 1.3 + rs * 2)) + index * 2.4 + 1.6 * Math.sin(f * 0.8 + index * 1.7) + 0.6 * Math.sin(f * 2.9 + index);
+          const separate = 0.78 + 0.35 * Math.max(0, Math.sin(f * 0.7 + index * 1.9)) + 0.5 * Math.max(0, Math.sin(f * 0.37 + index * 2.7 + rs * 4)) ** 3;
           const offset = bundle * shape.o * separate * splay;
           let tx = c.tx, ty = c.ty; const tl = Math.sqrt(tx * tx + ty * ty) || 1; tx /= tl; ty /= tl;
           // Moss in patches along the root; the lower end weathered paler, like the painted roots around it.
@@ -623,8 +739,10 @@ export default function LoginCanopyScene({ cardRef, reducedMotion, skipIntro = f
           const pale = 0.1 * (1 - smoothstep(0, 0.6 * scale, fromEnd));
           const cw = Math.cos(wander) * offset * grow;
           o.x = wx(c.x - ty * cw); o.y = wy(c.y + tx * cw); o.z = wr(Math.sin(wander) * offset * grow);
-          o.r = wr(bundle * shape.r * (index ? grow : 1)); o.v = fromEnd / (0.36 * scale) + index * 0.37;
-          o.cr = 1.12 - moss * 0.42 + pale - index * 0.05; o.cg = 1.08 - moss * 0.02 + pale - index * 0.04; o.cb = 1.0 - moss * 0.5 + pale - index * 0.03;
+          o.r = wr(bundle * shape.r * (index ? grow : 1)); o.v = fromEnd / (1.0 * scale) + index * 0.37;   // texture in proportion: ~2 circumferences per repeat
+          // neutral olive (no warm cast): moss patches lean towards #506848, the weathered lower end slightly paler
+          const ti = Math.min(index, 2);   // the same per-strand shading as before for the added strands (no colour change)
+          o.cr = ROOT_TINT * (1.0 - moss * 0.3 + pale - ti * 0.04); o.cg = ROOT_TINT * (1.0 - moss * 0.08 + pale - ti * 0.04); o.cb = ROOT_TINT * (0.97 - moss * 0.28 + pale - ti * 0.03);
           o.a = (index ? smoothstep(0, 0.4, grow) : 1) * smoothstep(0, into * 0.9, s);
         });
       });
@@ -646,29 +764,90 @@ export default function LoginCanopyScene({ cardRef, reducedMotion, skipIntro = f
 
     // The trekking rope along its simulated chain; its last point is moved onto her real harness.
     const ropeBuf = Array.from({ length: 64 }, () => ({ x: 0, y: 0 })), ropePath = makePath(64);
+    const ropeBuf2 = Array.from({ length: 64 }, () => ({ x: 0, y: 0 })), ropePath2 = makePath(64);
+    function ropeTube(mesh, shadow, path, buf, n, S, k) {
+      const built = path.build(buf, n);
+      const L = built.total, R = Math.max(2, 0.013 * S), offX = 0.5 * R, offY = 1.0 * R;
+      writeTube(mesh, (t, o) => { built.at(t * L, tmpP); o.x = wx(tmpP.x); o.y = wy(tmpP.y); o.r = wr(R); o.v = (t * L) / (R * 6.5); });
+      writeTube(shadow, (t, o) => { built.at(t * L, tmpP); o.x = wx(tmpP.x + offX); o.y = wy(tmpP.y + offY); o.r = wr(R * 1.15); o.v = 0; });
+      mesh.position.z = -0.12 * k; mesh.visible = true; shadow.visible = true;
+    }
     function drawRope(rope, S, harnessPx, k) {
-      if (!rope || rope.pts.length < 2) { ropeMesh.visible = false; ropeShadow.visible = false; carabiner.visible = false; return; }
-      ropeMesh.visible = true; ropeShadow.visible = true;
-      const n = Math.min(rope.pts.length, ropeBuf.length);
-      for (let i = 0; i < n; i += 1) { ropeBuf[i].x = rope.pts[i].x; ropeBuf[i].y = rope.pts[i].y; }
-      if (harnessPx && rope.clipped) {
-        const ex = harnessPx[0] - ropeBuf[n - 1].x, ey = harnessPx[1] - ropeBuf[n - 1].y;
-        for (let i = 0; i < n; i += 1) { const w = smoothstep(0.5, 1, i / (n - 1)); ropeBuf[i].x += ex * w; ropeBuf[i].y += ey * w; }
+      if (!rope) { ropeMesh.visible = false; ropeShadow.visible = false; ropeMesh2.visible = false; ropeShadow2.visible = false; carabiner.visible = false; return; }
+      // After the break both halves (and their shadows and the anchor) fade out together over 450 ms.
+      const fade = rope.fade ?? 1;
+      ropeMaterial.opacity = fade; ropeShadowMaterial.opacity = 0.3 * fade; steel.opacity = fade;
+      const halves = rope.segments || [rope.pts];
+      const snap = (buf, n) => {
+        // The end at her harness follows her exactly (the simulation runs at its own step).
+        if (!harnessPx || !rope.clipped) return;
+        const ex = harnessPx[0] - buf[n - 1].x, ey = harnessPx[1] - buf[n - 1].y;
+        for (let i = 0; i < n; i += 1) { const w = smoothstep(0.5, 1, i / (n - 1)); buf[i].x += ex * w; buf[i].y += ey * w; }
+      };
+      const fill = (buf, pts) => { const n = Math.min(pts.length, buf.length); for (let i = 0; i < n; i += 1) { buf[i].x = pts[i].x; buf[i].y = pts[i].y; } return n; };
+      if (halves.length === 1) {
+        const n = fill(ropeBuf, halves[0]); snap(ropeBuf, n);
+        ropeTube(ropeMesh, ropeShadow, ropePath, ropeBuf, n, S, k);
+        ropeMesh2.visible = false; ropeShadow2.visible = false;
+      } else {
+        const n1 = fill(ropeBuf, halves[0]);
+        ropeTube(ropeMesh, ropeShadow, ropePath, ropeBuf, n1, S, k);
+        const n2 = fill(ropeBuf2, halves[1]); snap(ropeBuf2, n2);
+        ropeTube(ropeMesh2, ropeShadow2, ropePath2, ropeBuf2, n2, S, k);
       }
-      const path = ropePath.build(ropeBuf, n);
-      const L = path.total, R = Math.max(1.8, 0.012 * S), offX = 0.5 * R, offY = 1.0 * R;
-      writeTube(ropeMesh, (t, o) => { path.at(t * L, tmpP); o.x = wx(tmpP.x); o.y = wy(tmpP.y); o.r = wr(R); o.v = (t * L) / (R * 9); });
-      writeTube(ropeShadow, (t, o) => { path.at(t * L, tmpP); o.x = wx(tmpP.x + offX); o.y = wy(tmpP.y + offY); o.r = wr(R * 1.15); o.v = 0; });
-      ropeMesh.position.z = -0.12 * k;
       if (rope.ring) {
-        // The ring's centre is the rope's anchor point; the plate sits on the border just to its left (the rope stays
-        // tied to it after it comes off her harness).
+        // The ring's centre is the rope's anchor point; the plate sits on the border just to its left.
         carabiner.visible = true;
         const s = wr(Math.max(3.2, 0.02 * S));
         carabiner.scale.set(s, s, s);
         carabiner.position.set(wx(rope.ring[0]) - 0.9 * s, wy(rope.ring[1]) + 0.35 * s, 0.2);
         carabiner.rotation.set(0, 0, 0);
       } else carabiner.visible = false;
+    }
+    // The limb on the trunk (static for a layout): a tapered bark tube that flares where it grows out of the trunk, with
+    // knots, a moss strip along its top, its soft shadow on the forest behind, a mossy twig and two rootlets under it.
+    const limbRadius = (limb, t) => {
+      const base = limb.r0 + (limb.r1 - limb.r0) * Math.pow(t, 0.8);
+      const flare = 1 + 0.55 * (1 - smoothstep(0, 0.16, t));
+      const knots = 0.12 * Math.exp(-(((t - 0.36) / 0.03) ** 2)) + 0.09 * Math.exp(-(((t - 0.68) / 0.025) ** 2));
+      const tip = t > 0.975 ? 1 - ((t - 0.975) / 0.025) * 0.55 : 1;
+      return base * (flare + knots) * tip;
+    };
+    function drawLimb(limb, S) {
+      if (!limb) { limbMesh.visible = false; limbShadow.visible = false; limbMoss.visible = false; limbTwigs.forEach((tw) => { tw.mesh.visible = false; }); return; }
+      const n = Math.min(limb.pts.length, limbBuf.length);
+      for (let i = 0; i < n; i += 1) { limbBuf[i].x = limb.pts[i][0]; limbBuf[i].y = limb.pts[i][1]; }
+      const path = limbPath.build(limbBuf, n), L = path.total;
+      // a level limb (tablet / phone) shows more of its shaded underside than the sloping desktop one: lift it so its
+      // rendered bark matches the painted trunk and roots at every size
+      const lean = Math.abs((limb.pts[n - 1][1] - limb.pts[0][1]) / ((limb.pts[n - 1][0] - limb.pts[0][0]) || 1));
+      const lift = 1 + 0.2 * (1 - smoothstep(0.1, 0.35, lean));
+      writeTube(limbMesh, (t, o) => {
+        path.at(t * L, tmpP);
+        o.x = wx(tmpP.x); o.y = wy(tmpP.y); o.r = wr(limbRadius(limb, t)); o.v = (t * L) / (limb.r0 * 11);   // same bark proportions as the roots
+        // a little darker and greener where it leaves the shaded trunk, as the painting's limbs are
+        // the same bark as the roots, a little darker where it leaves the shaded trunk
+        const d = 0.8 + 0.2 * smoothstep(0, 0.5, t); o.cr = d * lift * LIMB_TINT[0]; o.cg = d * lift * LIMB_TINT[1]; o.cb = d * lift * LIMB_TINT[2];
+      });
+      writeTube(limbShadow, (t, o) => {
+        path.at(t * L, tmpP); const r = limbRadius(limb, t);
+        o.x = wx(tmpP.x + 0.3 * r); o.y = wy(tmpP.y + 0.75 * r); o.r = wr(r * 1.25); o.v = 0;
+      });
+      writeTube(limbMoss, (t, o) => {
+        const tt = 0.1 + 0.55 * t; path.at(tt * L, tmpP); const r = limbRadius(limb, tt);
+        // along its top: offset towards "up" across the path (the side facing the sky)
+        let nx = tmpP.ty, ny = -tmpP.tx; if (ny > 0) { nx = -nx; ny = -ny; }
+        // thin broken patches hugging the top edge (not one continuous ribbon), the bark map at the limb's scale
+        const patch = Math.max(0, 0.15 + 0.85 * Math.sin(t * 19 + 1.3) * Math.sin(t * 7.1 + 0.4));
+        o.x = wx(tmpP.x + nx * 0.82 * r); o.y = wy(tmpP.y + ny * 0.82 * r); o.r = wr(r * 0.2 * Math.sin(Math.PI * t) * patch + 0.2); o.v = (tt * L) / (limb.r0 * 11);
+      });
+      limbMesh.visible = true; limbShadow.visible = true; limbMoss.visible = true;
+      limbTwigs.forEach((tw, i) => {
+        path.at(tw.at * L, cP);
+        const bx = cP.x, by = cP.y + limbRadius(limb, tw.at) * 0.7, len = tw.len * S, sway = i === 1 ? -0.3 : 0.2;
+        writeTube(tw.mesh, (t, o) => { o.x = wx(bx + sway * len * t * t); o.y = wy(by + len * t); o.r = wr(Math.max(0.6, 0.012 * S * (1 - 0.7 * t))); o.v = t * 2; });
+        tw.mesh.visible = true;
+      });
     }
 
     // ------------------------------------------------------------ the card's position
@@ -860,6 +1039,14 @@ export default function LoginCanopyScene({ cardRef, reducedMotion, skipIntro = f
       actorState.harness = [sx(vC.x), sy(vC.y)];
     }
     function drawShadows(desc, stage, cardOff) {
+      if (desc && actor && desc.limbFeet) {
+        // Boots on the limb: a soft contact shadow on the bark under them.
+        contactShadow.visible = true; legShadow.visible = false;
+        contactShadow.position.set(wx(desc.limbFeet[0]), wy(desc.limbFeet[1] + 0.004 * stage.S), -0.6);
+        contactShadow.scale.set(wr(0.26 * stage.S), wr(0.045 * stage.S), 1);
+        shadowMaterial.opacity = 0.32;
+        return;
+      }
       if (desc && actor && desc.anchor?.joint === 'origin' && Math.abs(desc.anchor.y - stage.ground) < 2 && !(desc.anchor2?.w > 0.5)) {
         // Running on the forest floor.
         actor.world('Hips', vC);
@@ -930,6 +1117,7 @@ export default function LoginCanopyScene({ cardRef, reducedMotion, skipIntro = f
       driveActor(frame.actor, stage, frame, fdt);
       drawShadows(frame.actor, stage, frame.card);
       drawRope(frame.rope, stage.S, actorState.harness, actorState.k);
+      drawLimb(frame.limb, stage.S);
       // Once the rope is gone (a quarter second after it comes off her, or the intro skipped) her hip coil goes too.
       if (ropeCoil.length && ropeCoilShown === !!frame.ropeGone) { ropeCoilShown = !frame.ropeGone; ropeCoil.forEach((m) => { m.visible = ropeCoilShown; }); }
       // The trunk is never drawn over the card.

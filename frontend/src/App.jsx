@@ -143,7 +143,7 @@ function AppRouter() {
   else if (!user) page = <Navigate to="/login" replace state={{ from: location }}/>;
   else page = <Workspace user={user} onLogout={signOut}/>;
   return <>{page}{arrivalTransition&&<div className="auth-flight-transition" role="status" aria-live="polite">
-    <img className="auth-transition-forest" src="/images/forest-banyan-backdrop.png" alt="" aria-hidden="true" />
+    <img className="auth-transition-forest" src="/images/forest-banyan-backdrop-zovive.png" alt="" aria-hidden="true" />
     <div className="auth-transition-shade" aria-hidden="true" />
     <img className="auth-transition-officer" src="/images/forest-officer-root-swing.png" alt="" aria-hidden="true" onAnimationEnd={finishArrivalTransition}/>
     <div className="auth-flight-copy"><i/> ACCESS VERIFIED <span>·</span> ENTERING FIELD NETWORK</div>
