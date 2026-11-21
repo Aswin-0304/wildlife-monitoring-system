@@ -58,7 +58,7 @@ function polyY(pts, x) {
 export function computeStage(view) {
   const lay = introLayout(view);
   const st = { ...lay, card: { ...view.card }, blocked: view.blocked || [], inputTop: view.inputTop ?? view.card.top + 0.3 * lay.ch,
-    trunk: view.trunk || null, branch: view.branch || null };
+    trunk: view.trunk || null, branch: view.branch || null, rootPath: view.rootPath || null };
   if (lay.mode === 'none') return st;
   const { S, T, L, R, W, H } = lay;
   st.g = G_S * S;
@@ -118,6 +118,18 @@ function hiddenBox(st, x0, x1, y0, y1) {
 
 // ---------------------------------------------------------------- motion helpers
 
+/** A surface line on screen (px), by arc length s from its first point: at(s), the unit direction down it, and the
+ * first s at or below a height. */
+function surfacePath(pts) {
+  const seg = []; let total = 0;
+  for (let i = 1; i < pts.length; i += 1) { const l = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); seg.push(l); total += l; }
+  const find = (s0) => { let s = clamp(s0, 0, total), i = 0; while (i < seg.length - 1 && s > seg[i]) { s -= seg[i]; i += 1; } return [i, seg[i] ? s / seg[i] : 0]; };
+  const at = (s) => { const [i, f] = find(s); return [mix(pts[i][0], pts[i + 1][0], f), mix(pts[i][1], pts[i + 1][1], f)]; };
+  const dir = (s) => { const [i] = find(s), dx = pts[i + 1][0] - pts[i][0], dy = pts[i + 1][1] - pts[i][1], l = Math.hypot(dx, dy) || 1; return [dx / l, dy / l]; };
+  const sAtY = (y) => { for (let k = 0; k <= 600; k += 1) { const s = (k / 600) * total; if (at(s)[1] >= y) return s; } return total; };
+  return { total, at, dir, sAtY };
+}
+
 /** Ballistic path from p0 to p1 in time Tf under gravity g (y down). */
 function ballistic(p0, p1, Tf, g) {
   const vx = (p1[0] - p0[0]) / Tf, vy = (p1[1] - p0[1] - 0.5 * g * Tf * Tf) / Tf;
@@ -170,16 +182,19 @@ function buildPlan(st, clips) {
     };
   };
 
-  // ---- a limb of the banyan (the scene draws it from plan.limb): its top surface at x, from its base (at the trunk, or
-  // beyond the screen edge where the trunk is off screen) to its tip; it rises by `slope` towards the tip and bows up a
-  // little; footX / footY is a point on its top.
-  const makeLimb = (baseX, tipX, footX, footY, slope, r0, r1) => {
-    const fOf = (x) => clamp((baseX - x) / Math.max(1, baseX - tipX), 0, 1);
-    const topY = (x) => footY - (footX - x) * slope - 0.03 * S * Math.sin(Math.PI * fOf(x));
-    const rAt = (x) => mix(r0, r1, fOf(x));
-    return { topY, rAt, tipX, baseX, r0, r1, pts: Array.from({ length: 25 }, (_, k) => { const x = mix(baseX, tipX, k / 24); return [x, topY(x) + rAt(x)]; }) };
+  // ---- the painted banyan's thick diagonal root (st.rootPath: its top surface on screen, from where it leaves the
+  // horizontal roots down towards the forest floor): her landing and running surface in the ending. No added geometry.
+  const P = st.rootPath && st.rootPath.length > 1 ? surfacePath(st.rootPath) : null;
+  const rootSpot = (y) => {
+    if (!P) return [Math.min(W - 0.3 * S, R + 0.5 * S), y];
+    const p0 = P.at(0);
+    if (p0[1] <= y) return P.at(P.sAtY(y));
+    // above the traced part: on up the same root, where it grows out of the horizontal roots
+    const d = P.dir(0), k = (p0[1] - y) / Math.max(0.2, d[1]);
+    return [p0[0] - d[0] * k, y];
   };
-  let narrowLimb = null, narrowFoot = 0;
+  const flatFeet = (p) => [[p[0] - 0.06 * S, p[1] - BODY.ankle * S], [p[0] + 0.07 * S, p[1] - BODY.ankle * S]];
+  let narrowJ = null, tReturn = null;
 
   // ---- act 1: she leaps into the scene from the canopy at the upper left — already airborne as she enters, body
   // stretched out in a forward dive, legs extending; in the air she rights herself and reaches overhead for the
@@ -349,28 +364,25 @@ function buildPlan(st, clips) {
     }, 'TravelRight');
     const exitH = dropAt(tDrop);
     sU0 = sTop + 0.04 * S;
-    // The limb she leaps back onto: it comes in from the right edge (the trunk is off screen at this height), level with
-    // the card's top edge, and ends beside the card (or, with no room beside it, behind the card's top-right corner);
-    // standing on it, her head stays in view.
-    const yTop = clamp(T - 0.05 * S, 0.97 * S + 6, T + 0.15 * S);
-    const tipN = W - R > 0.55 * S ? R + 0.05 * S : R - 0.9 * S;
-    narrowFoot = Math.min(W - 0.24 * S, Math.max(tipN + 0.6 * S, W - 0.4 * S));
-    narrowLimb = makeLimb(W + 0.35 * S, tipN, narrowFoot, yTop, 0, 0.065 * S, 0.034 * S);
-    const crouchN = [narrowFoot + 0.03 * S, narrowLimb.topY(narrowFoot) - 0.33 * S];
+    // Back in from beyond the right edge onto the painted banyan: the top end of its thick diagonal root, where it leaves
+    // the horizontal roots just above the card's top-right corner (lower down, the card covers it).
+    narrowJ = rootSpot(T - 0.1 * S);
+    const crouchN = [narrowJ[0] + 0.03 * S, narrowJ[1] - 0.33 * S];
     const ys = crouchN[1] - 0.16 * S;
-    const xs = clamp(trunkEdge(st, ys) + 0.38 * S, narrowFoot + 0.7 * S, W + 0.45 * S);
+    const xs = clamp(trunkEdge(st, ys) + 0.38 * S, narrowJ[0] + 0.7 * S, W + 0.45 * S);
     const tHid = 0.65;
     hideInterval = { t0: time, t1: time + tHid, from: [exitH[0] - 0.07 * S, exitH[1] + 0.03 * S], to: [xs - 0.07 * S, ys + 0.03 * S] };
     add('behind_trunk', tHid, (u) => ({ hidden: true, ropeEnd: [mix(hideInterval.from[0], hideInterval.to[0], smooth(u)), mix(hideInterval.from[1], hideInterval.to[1], smooth(u)) - 0.6 * S * Math.sin(Math.PI * u)] }), 'TravelRight');
     const Tf2 = clamp((xs - crouchN[0]) / (2.4 * S), 0.38, 0.6);
     const fly2 = ballistic([xs, ys], crouchN, Tf2, g);
+    const fJ = flatFeet(narrowJ);
+    tReturn = time;
     add('return_leap', Tf2, (u) => {
-      // Back in from the trunk's side, knees drawn up, then boots reaching down for the limb.
+      // Back in from the trunk's side, knees drawn up, then boots reaching down for the root.
       const tau = u * Tf2, h = fly2.at(tau), meet = smoothstep(0.72, 1, u);
-      const f0 = [narrowFoot - 0.06 * S, narrowLimb.topY(narrowFoot - 0.06 * S) - BODY.ankle * S], f1 = [narrowFoot + 0.07 * S, narrowLimb.topY(narrowFoot + 0.07 * S) - BODY.ankle * S];
       return { layers: [{ clip: 'Ranger_Idle', t: 1.2 }, { clip: 'Ranger_Jump', t: mix(1.0, 1.1, u), w: 0.85 * (1 - meet) }, { clip: 'Ranger_Jump', t: 0.433, w: 0.7 * meet }],
         yaw: LEFT, roll: -0.15 * (1 - meet), anchor: { joint: 'Hips', x: h[0], y: h[1] }, hips: h,
-        ik: [{ limb: 'rightLeg', x: f0[0], y: f0[1], pole: POLE.legL, w: meet }, { limb: 'leftLeg', x: f1[0], y: f1[1], pole: POLE.legL, w: meet }],
+        ik: [{ limb: 'rightLeg', x: fJ[0][0], y: fJ[0][1], pole: POLE.legL, w: meet }, { limb: 'leftLeg', x: fJ[1][0], y: fJ[1][1], pole: POLE.legL, w: meet }],
         tweaks: { tuck: 0.6 * Math.sin(Math.PI * u) * (1 - meet), headPitch: -0.1, gripL: 0.2, gripR: 0.2 }, phase: 'TravelRight' };
     }, 'TravelRight');
   }
@@ -393,12 +405,12 @@ function buildPlan(st, clips) {
   for (let k = 0; k <= 200; k += 1) { const tt = t40 + (k / 200) * (tC - t40); if (minJerk((tt - t40) / (tC - t40)) >= fracOn) { tEnter = tt; break; } }
   ev(t40, 'ropeTaut'); ev(tC, 'cardStop'); ev(tRelease, 'ropeSlack');
 
-  // ---- the ending. Wide screens: root B carries her out towards a limb that grows from the banyan trunk at the right
-  // (the scene draws it from plan.limb, in the same bark as the roots, emerging from behind the painted trunk). Her
-  // boots meet its top at the end of the swing; she lets go, absorbs the landing with a hand on the bark, stands, turns,
-  // runs a few steps up the limb and springs from its tip onto the card's top edge. Her body stays in front of (left of)
-  // the painted trunk the whole time. Narrow screens (the trunk is off screen): she hangs high on root B at the right
-  // edge and springs from there. The rope breaks at 95 % of its active part (from when it is thrown to the kick-off).
+  // ---- the ending, on the painted banyan itself (nothing added to the tree). Wide screens: root B swings her out to the
+  // trunk; her boots stomp onto its bark (knees absorb, a hand slaps flat on it); she lets go and kicks off the trunk
+  // across onto the thick diagonal root, lands on it (knees, a hand on the bark), stands, runs a few steps down it and
+  // springs from it onto the card's top edge. Narrow screens (the card covers the root lower down; the trunk is off screen
+  // at that height): back from behind the trunk onto the root's top end above the card's top-right corner, then the
+  // spring onto the card. The rope breaks at 95 % of its active part (from when it is thrown to the kick-off).
   const seatX = st.seat.x;
   const landX = clamp(seatX + 0.14 * S, st.L + 0.3 * S, R - 0.16 * S);
   // Lands with her knees well bent: hips this far above the card's top edge, leaning forward over her feet (her head
@@ -432,38 +444,44 @@ function buildPlan(st, clips) {
   // The rope's active part runs from when it is thrown (tTake) to the kick-off; it breaks at 95 % of that, after the
   // card has settled. waitFor(tPush) is how long she must pause before the kick-off for that to hold.
   const waitFor = (tPushPlanned) => Math.max(0, tTake + (tRelease + 0.08 - tTake) / 0.95 - tPushPlanned);
-  let limb = null, pushFrom, pushYaw, pushRoll, pushFeet = null;
+  let pushFrom, pushYaw, pushRoll, pushFeet = null, pushContact = null;
   const holdHang = null;
-  let L, footX, fromHang = null;   // the limb she runs on; where her boots land on it; the hang she comes from (wide)
+  const ankleUp = BODY.ankle * S;
+  const feetIKto = (fe, yaw, w = 1) => { const pole = legPole(yaw); return [{ limb: 'rightLeg', x: fe[0][0], y: fe[0][1], pole, w }, { limb: 'leftLeg', x: fe[1][0], y: fe[1][1], pole, w }]; };
+  // On the root: her ankles one ankle-height above the bark (the soles rest on it, they never sink in); the back (uphill)
+  // foot and the front foot a short step apart along it.
+  const footOn = (s) => { const p = P.at(s); return [p[0], p[1] - ankleUp]; };
+  const feetOnRoot = (s, gap = 0.065 * S) => [footOn(Math.max(0, s - gap)), footOn(Math.min(P.total, s + gap))];
+  let feetL, footMid, sL = 0, sP = 0;    // her boots' landing on the root; the run down it to where she pushes off
+  const onRoot = side && !!P;
+  if (onRoot) {
+    // Where she pushes off: as low on the root as she can while her body stays clear of the card's right edge.
+    for (let s = 0; s <= P.total; s += 2) if (P.at(s)[0] >= R + 0.32 * S) sP = s;
+    // Where she lands: room for a few steps above that, her head in view, in front of the trunk.
+    let sMin = sP;
+    for (let s = 0; s <= sP; s += 2) { const q = P.at(s); if (q[1] - 0.98 * S >= 8 && q[0] <= trunkEdge(st, q[1] - 0.5 * S) - 0.35 * S) { sMin = s; break; } }
+    sL = clamp(Math.max(sMin, sP - 0.8 * S), 0, sP);
+    feetL = feetOnRoot(sL); footMid = P.at(sL);
+  } else {
+    const J = narrowJ || rootSpot(T - 0.1 * S);
+    feetL = flatFeet(J); footMid = J;
+  }
+  const crouch = [footMid[0] + (onRoot ? -0.03 : 0.03) * S, footMid[1] - 0.33 * S];
+  const stand = [footMid[0] - 0.02 * S, footMid[1] - (onRoot ? 0.47 : 0.49) * S];   // on the slope the lower foot is further down
+
   if (side) {
     const s0 = swingStart || { th: 0, om: 1 };
-    // Where the swing turns: her hips well short of the trunk (boots and knees stay in front of the painted bark).
+    // Where the swing turns: close enough to the trunk for her boots to meet its bark.
     let th1 = 0.9;
     for (let th = Math.max(0.25, s0.th + 0.05); th <= 0.9; th += 0.005) {
-      const hp = hipsOn(th), edge = Math.min(st.W + 0.5 * S, trunkEdge(st, hp[1] + 0.4 * S));
-      if (hp[0] >= edge - 0.45 * S || hp[0] >= 0.93 * W) { th1 = th; break; }
+      const hp = hipsOn(th), edge = Math.min(st.W + 0.5 * S, trunkEdge(st, hp[1] + 0.36 * S));
+      if (hp[0] >= edge - 0.3 * S || hp[0] >= 0.93 * W) { th1 = th; break; }
     }
     const hp1 = hipsOn(th1);
-    // The limb: its top meets her boots there, and it rises gently (about 16 degrees) towards the card; its base runs
-    // into the trunk (hidden behind the painted bark).
-    footX = hp1[0] + 0.05 * S;
-    const footY = hp1[1] + 0.44 * S;
-    const tipX = Math.max(R + 0.3 * S, footX - 1.8 * S);
-    const edgeAtFoot = trunkEdge(st, footY);
-    const baseX = Number.isFinite(edgeAtFoot) ? Math.min(st.W + 0.3 * S, Math.max(footX + 0.3 * S, edgeAtFoot + 0.25 * S)) : st.W + 0.3 * S;
-    L = makeLimb(baseX, tipX, footX, footY, Math.tan(0.28), 0.085 * S, 0.036 * S);
-    fromHang = { th1, hp1, s0 };
-  } else {
-    L = narrowLimb; footX = narrowFoot;
-  }
-  limb = { pts: L.pts, r0: L.r0, r1: L.r1 };
-  const topY = L.topY;
-  // (IK places her ankles: they sit one ankle-height above the bark, so the soles rest on it rather than sinking in)
-  const feetOn = (x0) => [[x0 - 0.06 * S, topY(x0 - 0.06 * S) - BODY.ankle * S], [x0 + 0.07 * S, topY(x0 + 0.07 * S) - BODY.ankle * S]];
-  const feetIK = (x0, yaw, w = 1) => { const f = feetOn(x0), pole = legPole(yaw); return [{ limb: 'rightLeg', x: f[0][0], y: f[0][1], pole, w }, { limb: 'leftLeg', x: f[1][0], y: f[1][1], pole, w }]; };
-  if (fromHang) {
-    // Stage A — the swing out, rope pulled straight: legs come forward and down to meet the limb as the swing slows.
-    const { th1, s0 } = fromHang;
+    // Her boots on the trunk's face (the painted bark at its left edge), one a little above the other.
+    const plantAt = (y, k) => [Math.min(st.W - 0.03 * S, trunkEdge(st, y)) - k * S, y];
+    const plant = [plantAt(hp1[1] + 0.3 * S, 0.06), plantAt(hp1[1] + 0.42 * S, 0.07)];
+    // Stage A — the swing out towards the tree, rope pulled straight: the legs come up and forward to meet the trunk.
     const Tout = clamp(((th1 - s0.th) * Math.PI) / (2 * Math.max(0.35, s0.om)), 0.5, 1.1);
     const thOut = (tau) => s0.th + (th1 - s0.th) * Math.sin((Math.PI / 2) * clamp(tau / Tout, 0, 1));
     ev(time, 'ropeTension');
@@ -471,94 +489,129 @@ function buildPlan(st, clips) {
       const tau = u * Tout, th = thOut(tau), near = smoothstep(0.4, 1, u);
       const a = hangPose('B', gripOn(th), sU0, th, 1, mix(0.4, 0.7, near), { phase: 'SwingRight', tweaks: { tuck: 0.25 * near, shrug: 0.2, headPitch: -0.1 } });
       const reach = smoothstep(0.72, 1, u);
-      if (reach > 0) a.ik.push(...feetIK(footX, RIGHT, reach));
+      if (reach > 0) a.ik.push(...feetIKto(plant, RIGHT, reach));
       return a;
     }, 'SwingRight');
+    // Stage B — the boots stomp onto the trunk and she lets go of root B on impact (it swings back clear of her path):
+    // the knees take the impact, her body carries on towards the bark (upper body forward, more upright), her left hand
+    // slaps flat on the trunk to steady her, and she sinks a little before the push.
+    const tPlant = 0.34;
+    ev(time + 0.03, 'release', { root: 'B' });
+    ev(time + 0.03, 'dust', { x: plant[0][0] + 0.04 * S, y: plant[0][1] + 0.05 * S, n: 3 });
+    // her left hand on the trunk's bark: the nearest point of its edge within arm's reach of her shoulders (the trunk
+    // leans, so higher up it is further away)
+    const plantEnd0 = [hp1[0] + 0.08 * S, hp1[1] + 0.05 * S], phiP = 0.4 * th1;
+    const shP = [plantEnd0[0] - Math.sin(phiP) * 0.29 * S, plantEnd0[1] - Math.cos(phiP) * 0.29 * S];
+    let handT = null;
+    for (let y = shP[1] - 0.1 * S; y <= plantEnd0[1] + 0.05 * S; y += 2) {
+      const q = [Math.min(st.W - 0.03 * S, trunkEdge(st, y)) - 0.03 * S, y];
+      if (Math.hypot(q[0] - shP[0], q[1] - shP[1]) <= 0.37 * S) { handT = q; break; }
+    }
+    if (!handT) { const y = shP[1] + 0.1 * S, q = [Math.min(st.W - 0.03 * S, trunkEdge(st, y)) - 0.03 * S, y], d = Math.hypot(q[0] - shP[0], q[1] - shP[1]) || 1; handT = [shP[0] + (q[0] - shP[0]) * (0.37 * S / d), shP[1] + (q[1] - shP[1]) * (0.37 * S / d)]; }
+    const plantEnd = [hp1[0] + 0.08 * S, hp1[1] + 0.05 * S];
+    add('trunk_land', tPlant, (u) => {
+      const absorb = smoothstep(0, 0.6, u), rebound = smoothstep(0.6, 1, u);
+      const h = [mix(hp1[0], plantEnd[0], absorb) - 0.02 * S * rebound, mix(hp1[1], plantEnd[1], absorb)];
+      const hw = smoothstep(0.05, 0.4, u);
+      const g0 = gripOn(th1);
+      return { layers: [{ clip: 'Ranger_Idle', t: 1.2 }, { clip: 'Ranger_Jump', t: 0.433, w: 0.6 * absorb }], yaw: RIGHT,
+        roll: mix(-th1 * 0.75, -0.12, smoothstep(0, 0.55, u)),
+        anchor: { joint: 'Hips', x: h[0], y: h[1] }, hips: h,
+        ik: [{ limb: 'leftArm', x: mix(g0[0], handT[0], hw), y: mix(g0[1] + 0.05 * S, handT[1], hw), pole: POLE.armR, w: 1 },
+          { limb: 'rightArm', x: mix(g0[0], h[0] - 0.12 * S, hw), y: mix(g0[1], h[1] - 0.18 * S, hw), pole: POLE.armL, w: 1 - 0.6 * hw },
+          ...feetIKto(plant, RIGHT)],
+        tweaks: { spine: 0.24 * absorb - 0.06 * rebound, headPitch: 0.1, gripL: 0.15, gripR: 1 - hw, shrug: 0.06 }, phase: 'TrunkLanding' };
+    }, 'TrunkLanding');
+    // Stage C — the legs drive her off the trunk, up and across onto the diagonal root: she turns to face the card early,
+    // tucks, then her legs reach down for the bark.
+    const TfK = clamp(Math.hypot(crouch[0] - plantEnd[0], crouch[1] - plantEnd[1]) / (2.5 * S), 0.4, 0.62);
+    const flyK = ballistic(plantEnd, crouch, TfK, g);
+    add('trunk_kick', TfK, (u) => {
+      const tau = u * TfK, h = flyK.at(tau);
+      const off = 1 - smoothstep(0, 0.22, u);        // the boots leave the bark as the legs straighten ...
+      const meet = smoothstep(0.7, 1, u);            // ... and reach for the root
+      const yaw = mix(RIGHT, LEFT, smoothstep(0.05, 0.45, u));
+      const legs = off > meet ? feetIKto(plant, yaw, off) : feetIKto(feetL, yaw, meet);
+      const tk = Math.sin(Math.PI * smoothstep(0.18, 0.8, u));
+      return { layers: [{ clip: 'Ranger_Idle', t: 1.2 }, { clip: 'Ranger_Jump', t: mix(0.75, 1.05, u), w: 0.85 * (1 - meet) }, { clip: 'Ranger_Jump', t: 0.433, w: 0.6 * meet }],
+        yaw, roll: -0.12 * (1 - smoothstep(0, 0.3, u)) - 0.28 * tk * (1 - meet) - 0.1 * meet,
+        anchor: { joint: 'Hips', x: h[0], y: h[1] }, hips: h, ik: legs,
+        tweaks: { tuck: 0.75 * tk * (1 - meet), spine: 0.15 * tk, headPitch: -0.1, legSwing: 0.3 * meet, gripL: 0.2, gripR: 0.2 }, phase: 'TreeKick' };
+    }, 'TreeKick');
+    ev(time, 'ropeSlack');
   }
 
-  // Stage B — boots on the limb: knees absorb, her body rights itself, a hand steadies her on the bark; then she stands
-  // and turns (or settles, already facing it) towards the card.
-  const crouch = fromHang ? [footX - 0.03 * S, topY(footX) - 0.33 * S] : [footX + 0.03 * S, topY(footX) - 0.33 * S];
-  const stand = [footX - 0.02 * S, topY(footX) - 0.49 * S];
-  const handPt = [footX - 0.25 * S, topY(footX - 0.25 * S)];
-  const tLandL = 0.45;
-  if (fromHang) { ev(time + 0.12, 'release', { root: 'B' }); ev(time + 0.1, 'ropeSlack'); }
-  add('limb_land', tLandL, (u) => {
+  // Stage D — boots on the banyan root: the knees absorb the landing, she leans into it, a hand touches the bark just down
+  // the root to steady her, and she rights herself; then she stands.
+  const handPt = onRoot ? P.at(Math.min(P.total, sL + 0.3 * S)) : [footMid[0] - 0.16 * S, footMid[1] - 0.02 * S];
+  add('root_land', 0.45, (u) => {
     const down = smoothstep(0, 0.45, u), up = smoothstep(0.55, 1, u);
     const steady = 0.85 * Math.sin(Math.PI * smoothstep(0.2, 0.95, u));
-    if (fromHang) {
-      const { th1, hp1 } = fromHang;
-      const off = smoothstep(0.05, 0.4, u);                      // hands come off the root
-      const a = hangPose('B', gripOn(th1), sU0, th1, 1, 0.3, { phase: 'TreeLanding', w: 1 - off });
-      const h = [mix(hp1[0], crouch[0], down), mix(hp1[1], crouch[1], down) - 0.02 * S * up - 0.012 * S * Math.sin(Math.PI * smoothstep(0.5, 0.95, u))];
-      a.hips = h; a.anchor = { joint: 'Hips', x: h[0], y: h[1] };
-      a.grip = off < 0.5 ? gripOn(th1) : null; a.rootId = off < 0.5 ? 'B' : null;
-      a.roll = -th1 * (1 - smoothstep(0, 0.6, u));
-      a.ik = [...a.ik.filter((c) => c.limb === 'rightArm'), { limb: 'leftArm', x: mix(a.ik[1].x, handPt[0], smoothstep(0.1, 0.45, u)), y: mix(a.ik[1].y, handPt[1], smoothstep(0.1, 0.45, u)), pole: POLE.armR, w: Math.max(1 - off, steady) },
-        ...feetIK(footX, RIGHT)];
-      a.layers = [{ clip: 'Ranger_Idle', t: 1.2 }, { clip: 'Ranger_Jump', t: 0.433, w: 0.7 * down * (1 - 0.5 * up) }];
-      a.tweaks = { gripL: 1 - off, gripR: 1 - off, spine: 0.2 * down - 0.08 * up, headPitch: 0.08, shrug: 0.1 * (1 - off), hangLegs: 0, legSwing: 0 };
-      a.limbFeet = [footX, topY(footX)];
-      return a;
-    }
-    // Landed from the leap: the knees take it, a hand touches the bark in front of her, she rights herself.
     const h = [crouch[0] - 0.02 * S * down, crouch[1] + 0.03 * S * down - 0.05 * S * up - 0.012 * S * Math.sin(Math.PI * smoothstep(0.5, 0.95, u))];
     return { layers: [{ clip: 'Ranger_Idle', t: 1.2 }, { clip: 'Ranger_Jump', t: 0.433, w: 0.7 * (1 - 0.5 * up) }], yaw: LEFT, roll: -0.15 * (1 - down) - 0.08 * steady,
       anchor: { joint: 'Hips', x: h[0], y: h[1] }, hips: h,
-      ik: [...feetIK(footX, LEFT), { limb: 'rightArm', x: handPt[0], y: handPt[1], pole: POLE.armL, w: steady }],
-      tweaks: { spine: 0.22 * down - 0.08 * up, headPitch: 0.06, gripL: 0.2, gripR: 0.2 }, limbFeet: [footX, topY(footX)], phase: 'TreeLanding' };
+      ik: [...feetIKto(feetL, LEFT), { limb: 'rightArm', x: handPt[0], y: handPt[1] - 0.01 * S, pole: POLE.armL, w: steady }],
+      tweaks: { spine: 0.22 * down - 0.08 * up, headPitch: 0.06, gripL: 0.2, gripR: 0.2 }, treeFeet: footMid, phase: 'TreeLanding' };
   }, 'TreeLanding');
-  const tStand = fromHang ? 0.4 : 0.3;
-  const yaw0 = fromHang ? RIGHT : LEFT;
-  add('limb_stand', tStand, (u) => {
-    const f = smoothstep(0, 1, u), turn = smoothstep(0.1, 0.9, u), yaw = mix(yaw0, LEFT, turn);
+  add('root_stand', 0.32, (u) => {
+    const f = smoothstep(0, 1, u);
     const h = [mix(crouch[0], stand[0], f), mix(crouch[1] - 0.02 * S, stand[1], f)];
-    return { layers: [{ clip: 'Ranger_Idle', t: 1.2 }, { clip: 'Ranger_Jump', t: 0.433, w: 0.35 * (1 - f) }], yaw, roll: 0,
-      anchor: { joint: 'Hips', x: h[0], y: h[1] }, hips: h, ik: feetIK(footX, yaw), limbFeet: [footX, topY(footX)],
+    return { layers: [{ clip: 'Ranger_Idle', t: 1.2 }, { clip: 'Ranger_Jump', t: 0.433, w: 0.35 * (1 - f) }], yaw: LEFT, roll: 0,
+      anchor: { joint: 'Hips', x: h[0], y: h[1] }, hips: h, ik: feetIKto(feetL, LEFT), treeFeet: footMid,
       tweaks: { spine: 0.1 * (1 - f), headPitch: -0.04, gripL: 0.2, gripR: 0.2 }, phase: 'TreeStand' };
   }, 'TreeStand');
 
-  // Stage C — a few running steps along the limb (her soles on its top, stride matched to the run clip).
-  const runFrom = stand[0], runTo = L.tipX + 0.14 * S;
-  const D = Math.max(0, runFrom - runTo);
-  const vRun = (side ? 2.3 : 1.9) * S, tAcc = side ? 0.22 : 0.18;
-  const Trun = D > 0.2 * S ? tAcc + Math.max(0, D - 0.5 * vRun * tAcc) / vRun : 0;
-  const distAt = (tau) => Math.min(D, tau < tAcc ? (0.5 * vRun * tau * tau) / tAcc : 0.5 * vRun * tAcc + vRun * (tau - tAcc));
+  // Stage E — a few quick, controlled steps down the root: each footfall is placed on its top surface (the rear foot
+  // passes the other by one stride), the swinging foot lifts clear of the bark, the hips ride above the feet.
+  const runLen = onRoot ? Math.max(0, sP - sL) : 0;
+  const nSteps = runLen > 0.2 * S ? Math.max(2, Math.round(runLen / (0.3 * S))) : 0;
+  const stride = nSteps ? runLen / nSteps : 0, gap = 0.065 * S, tStep = 0.21, Trun = nSteps * tStep;
+  const plantS = (k) => clamp(k === 0 ? sL - gap : sL + gap + (k - 1) * stride, 0, P ? P.total : 0);
   // If the card is still settling, she waits a moment, standing, before the run (the rope breaks only after it).
   const wait = waitFor(time + Trun);
-  if (wait > 0.01) add('limb_wait', wait, () => ({ layers: [{ clip: 'Ranger_Idle', t: 1.2 }], yaw: LEFT, roll: 0, anchor: { joint: 'Hips', x: stand[0], y: stand[1] },
-    hips: stand, ik: feetIK(footX, LEFT), limbFeet: [footX, topY(footX)], tweaks: { gripL: 0.2, gripR: 0.2 }, phase: 'TreeStand' }), 'TreeStand');
-  if (Trun > 0) add('limb_run', Trun, (u) => {
-    const tau = u * Trun, d = distAt(tau), x = runFrom - d;
-    const into = smoothstep(0, Math.min(1, 0.2 / Trun), u);
-    return { layers: [{ clip: 'Ranger_Idle', t: 1.2 }, { clip: 'Ranger_Run', t: d / (RUN_SPEED * S), loop: true, w: into }], yaw: LEFT, roll: -0.1 * into,
-      anchor: { joint: 'feet', x, y: topY(x) }, hips: [x, topY(x) - 0.47 * S], limbFeet: [x, topY(x)],
-      tweaks: { headPitch: 0.04, gripL: 0.3, gripR: 0.3 }, phase: 'TreeRun' };
+  if (wait > 0.01) add('root_wait', wait, () => ({ layers: [{ clip: 'Ranger_Idle', t: 1.2 }], yaw: LEFT, roll: 0, anchor: { joint: 'Hips', x: stand[0], y: stand[1] },
+    hips: stand, ik: feetIKto(feetL, LEFT), treeFeet: footMid, tweaks: { gripL: 0.2, gripR: 0.2 }, phase: 'TreeStand' }), 'TreeStand');
+  if (nSteps) add('root_run', Trun, (u) => {
+    const x = u * nSteps, k = Math.min(nSteps, Math.floor(x) + 1), v = clamp(x - (k - 1), 0, 1);
+    const sMove = mix(plantS(k - 1), plantS(k + 1), smoothstep(0, 1, v)), sStay = plantS(k);
+    const pMove = footOn(sMove), pStay = footOn(sStay);
+    pMove[1] -= 0.07 * S * Math.sin(Math.PI * v);
+    const rightMoves = k % 2 === 1;
+    const fR = rightMoves ? pMove : pStay, fL = rightMoves ? pStay : pMove;
+    const sMid = 0.5 * (sMove + sStay), m = P.at(sMid);
+    const h = [m[0] - 0.015 * S, m[1] - 0.452 * S + 0.012 * S * Math.sin(Math.PI * v)];
+    const into = smoothstep(0, 0.6, x);
+    return { layers: [{ clip: 'Ranger_Idle', t: 1.2 }, { clip: 'Ranger_Run', t: (sMid - sL) / (RUN_SPEED * S), loop: true, w: 0.55 * into }], yaw: LEFT, roll: 0.05 * into,
+      anchor: { joint: 'Hips', x: h[0], y: h[1] }, hips: h,
+      ik: [{ limb: 'rightLeg', x: fR[0], y: fR[1], pole: legPole(LEFT), w: 1 }, { limb: 'leftLeg', x: fL[0], y: fL[1], pole: legPole(LEFT), w: 1 }],
+      treeFeet: P.at(sStay), tweaks: { headPitch: 0.08, gripL: 0.3, gripR: 0.3 }, phase: 'TreeRun' };
   }, 'TreeRun');
-  const xEnd = runFrom - D;
-  pushFrom = [xEnd, topY(xEnd) - 0.46 * S]; pushYaw = LEFT; pushRoll = 0.1; pushFeet = feetIK(xEnd, LEFT);
-  // Stage D — the rope breaks at its midpoint at 95 % of its active part, recoils and fades out over 450 ms.
+  if (nSteps) {
+    const s0e = plantS(nSteps), s1e = plantS(nSteps + 1), rLast = nSteps % 2 === 1;
+    const m = P.at(0.5 * (s0e + s1e));
+    pushFrom = [m[0] - 0.015 * S, m[1] - 0.45 * S];
+    const fR = footOn(rLast ? s1e : s0e), fL = footOn(rLast ? s0e : s1e);
+    pushFeet = [{ limb: 'rightLeg', x: fR[0], y: fR[1], pole: legPole(LEFT), w: 1 }, { limb: 'leftLeg', x: fL[0], y: fL[1], pole: legPole(LEFT), w: 1 }];
+    pushContact = P.at(s1e);
+  } else {
+    pushFrom = stand; pushFeet = feetIKto(feetL, LEFT); pushContact = footMid;
+  }
+  pushYaw = LEFT; pushRoll = 0.1;
+  // Stage F — the rope breaks at its midpoint at 95 % of its active part, recoils and fades out over 450 ms.
   const tPushStart = time;
   const tBreak = tTake + 0.95 * (tPushStart - tTake);
   ev(tBreak, 'ropeBreak');
   ev(tBreak + 0.45, 'ropeGone');
-  // Stage E — the kick-off and the leap onto the card.
+  // Stage G — the kick-off and the leap onto the card.
   const { leap, v0 } = kickOff(pushFrom);
   if (holdHang) ev(time, 'release', { root: 'B' });
-  add('limb_push', Tk, (u) => {
+  add('root_push', Tk, (u) => {
     const tau = u * Tk;
     const h = [pushFrom[0] + (v0[0] * tau * tau) / (2 * Tk), pushFrom[1] + (v0[1] * tau * tau) / (2 * Tk)];
-    if (holdHang) {
-      const a = hangPose('B', holdHang.grip, sU0, 0, -1, 0.3, { phase: 'TrunkPush', w: 1 - smoothstep(0, 0.45, u) });
-      a.hips = h; a.anchor = { joint: 'Hips', x: h[0], y: h[1] }; a.grip = u < 0.25 ? holdHang.grip : null; a.rootId = u < 0.25 ? 'B' : null;
-      a.layers = [{ clip: 'Ranger_Idle', t: 1.2 }, { clip: 'Ranger_Jump', t: 1.0, w: 0.7 * smoothstep(0.2, 1, u) }];
-      a.tweaks = { ...a.tweaks, gripL: 1 - u, gripR: 1 - u, spine: 0.1 * u };
-      return a;
-    }
-    // Off the limb: knees and hips extend, arms swing forward, the boots leave the tip last.
+    // Off the root: knees and hips extend, arms swing forward, the boots leave the bark last.
     return { layers: [{ clip: 'Ranger_Idle', t: 1.2 }, { clip: 'Ranger_Jump', t: mix(0.55, 0.8, u), w: 0.8 }], yaw: pushYaw, roll: -pushRoll * (1 - u) - 0.2 * u,
       anchor: { joint: 'Hips', x: h[0], y: h[1] }, hips: h, ik: pushFeet.map((c) => ({ ...c, w: 1 - smoothstep(0.12, 0.6, u) })),
-      limbFeet: u < 0.7 ? [pushFeet[0].x + 0.06 * S, pushFeet[0].y] : null, tweaks: { spine: 0.12, headPitch: -0.05, gripL: 0.2, gripR: 0.2 }, phase: 'TreePush' };
+      treeFeet: u < 0.7 ? pushContact : null, tweaks: { spine: 0.12, headPitch: -0.05, gripL: 0.2, gripR: 0.2 }, phase: 'TreePush' };
   }, 'TreePush');
   const tLaunch = time;
   const Tf3 = leap.Tf, fly3 = leap.fl;
@@ -624,7 +677,7 @@ function buildPlan(st, clips) {
   events.sort((a, b) => a.t - b.t);
   return { segs, events, tIdle: time, tow: { dx0: dx, dy0: dy, t40, tC, tEnter, tSettle, tRelease }, tCatch, tTake, tCatch2, PA, PB, l1,
     rootLenA: l1 + 0.32 * S, rootLenB: Math.max(sU0, st.lB1 || 0) + 0.5 * S, Tf, ampA, transfer, seatHands, nClimb, Af, tuckF, pumpStart, hideInterval,
-    limb, rope: { tStart: tTake, tPush: tPushStart, tBreak, fade: 0.45 } };
+    trunkOver: hideInterval ? { t0: tRelA, t1: tReturn ?? tCatch2 } : null, rootPath: P ? { sL, sP, nSteps } : null, rope: { tStart: tTake, tPush: tPushStart, tBreak, fade: 0.45 } };
 }
 
 // ---------------------------------------------------------------- flexible roots and rope (Verlet chains)
@@ -1143,7 +1196,8 @@ export function createIntro(stageIn, { settled = false, clips = {} } = {}) {
         ? { segments: [rope.A.pts, rope.B.pts], mode: 'broken', fade: clamp(1 - (time - rope.tBreak) / 0.45, 0, 1), ring: ringAt(time), clipped: true }
         : { pts: chainPoints(rope.chain), mode: rope.mode, ring: ringAt(time), clipped: rope.mode !== 'free', fade: 1 },
       ropeGone,
-      limb: plan ? plan.limb : null,
+      // the painted trunk is drawn over her only while she really passes behind it (narrow screens' exit and return)
+      trunkOver: !!(plan && plan.trunkOver && time >= plan.trunkOver.t0 && time <= plan.trunkOver.t1),
     };
   }
 

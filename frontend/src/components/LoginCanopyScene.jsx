@@ -16,6 +16,11 @@ const WORLD_HEIGHT = 6;
 // Left edge of the painted banyan trunk in the backdrop (image px, top to bottom).
 // Underside of the painted banyan branch across the top right (image px, left to right): the roots grow out of it.
 const BRANCH_UNDERSIDE = [[800, 45], [900, 62], [1000, 85], [1060, 120], [1100, 150], [1150, 160], [1200, 166], [1250, 166], [1300, 163], [1350, 160], [1400, 170], [1500, 185], [1672, 195]];
+// The top surface of the thick diagonal banyan root that leans down from the horizontal roots towards the forest floor
+// (image px, traced from the painting's bark): the ranger lands on it and runs down it before her leap onto the card.
+const TREE_ROOT_TOP = [[1322, 180], [1312, 215], [1306, 250], [1297, 280], [1285, 300], [1272, 322], [1262, 345], [1252, 370], [1243, 400], [1229, 422],
+  [1212, 442], [1196, 461], [1181, 480], [1167, 500], [1153, 520], [1140, 540], [1127, 560], [1113, 580], [1097, 600], [1082, 620], [1060, 640], [1034, 660],
+  [1005, 680], [975, 700], [945, 720]];
 const TRUNK_EDGE = [[1672, 150], [1662, 200], [1648, 270], [1625, 340], [1597, 415], [1565, 490], [1530, 565], [1495, 640], [1460, 720], [1425, 800], [1400, 880], [1386, 941]];
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -470,6 +475,9 @@ export default function LoginCanopyScene({ cardRef, reducedMotion, skipIntro = f
     trunkMaterial.toneMapped = false;
     const trunkMatte = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), trunkMaterial);
     trunkMatte.renderOrder = 60; trunkMatte.frustumCulled = false; trunkMatte.visible = false; frontScene.add(trunkMatte);
+    // Drawn only while the timeline has her pass behind the trunk (frame.trunkOver): it can never paint bark over her
+    // legs while she lands on, stands on or runs along the tree.
+    let trunkReady = false;
 
     const bark = barkTextures(); disposables.push(bark.map, bark.bump);
     const rootMaterial = new THREE.MeshStandardMaterial({ map: bark.map, bumpMap: bark.bump, bumpScale: 4, color: '#ffffff', roughness: 0.92, metalness: 0, vertexColors: true, transparent: true });
@@ -489,9 +497,6 @@ export default function LoginCanopyScene({ cardRef, reducedMotion, skipIntro = f
     mossMaterial.color.setRGB(6.0, 7.5, 9.1);
     // the hanging roots face the key light more squarely than the limb: a little darker so they sit with the painted roots
     const ROOT_TINT = 0.86;
-    // the limb lies across the warm key light (the roots hang facing the cooler sky fill): a slightly cooler tint so its
-    // rendered bark lands on the same colour as the painted trunk and roots
-    const LIMB_TINT = [0.88, 0.93, 0.9];
     const ropeTex = ropeTextures(); disposables.push(ropeTex.map, ropeTex.normal);
     // Matte braided nylon: rough, no sheen of plastic; the braid's relief comes from the normal map.
     const ropeMaterial = new THREE.MeshStandardMaterial({ map: ropeTex.map, normalMap: ropeTex.normal, normalScale: new THREE.Vector2(0.9, 0.9), color: '#ffffff',
@@ -514,16 +519,6 @@ export default function LoginCanopyScene({ cardRef, reducedMotion, skipIntro = f
     ropeShadow.visible = false;
     const ropeMesh2 = createTube(frontScene, 40, 10, ropeMaterial, -0.08, 18); ropeMesh2.visible = false;
     const ropeShadow2 = createTube(frontScene, 40, 5, ropeShadowMaterial, -0.1, 17); ropeShadow2.visible = false;
-    // A living limb growing out of the banyan trunk at the right (behind the glass, like the roots; its base disappears
-    // behind the painted trunk): wide screens, she lands on it, runs up it and springs from its tip onto the card.
-    const limbMesh = createTube(scene, 48, 14, rootMaterial, -5.2, 3); limbMesh.visible = false;
-    // its soft shadow on the forest behind, and a strip of moss along its top (as on the painted branches)
-    const limbShadow = createTube(scene, 48, 8, new THREE.MeshBasicMaterial({ color: '#28281E', transparent: true, opacity: 0.4, depthWrite: false }), -5.3, 2);
-    limbShadow.visible = false;
-    const limbMoss = createTube(scene, 24, 8, mossMaterial, -5.17, 4); limbMoss.visible = false;
-    const limbTwigs = [0.32, 0.55, 0.78].map((at, i) => ({ at, len: [0.16, 0.24, 0.12][i], mesh: createTube(scene, 10, 5, rootletMaterial, -5.18, 3) }));   // bark rootlets (a green one read as a blade of grass)
-    limbTwigs.forEach((tw) => { tw.mesh.visible = false; });
-    const limbPath = makePath(28), limbBuf = Array.from({ length: 28 }, () => ({ x: 0, y: 0 }));
     const steel = new THREE.MeshStandardMaterial({ color: '#c9ccc4', roughness: 0.32, metalness: 0.75, transparent: true });
     // The anchor on the card's right border: a bolt hanger plate fixed to the border, and a steel ring through it that
     // the rope is tied to (the ring hangs out from the border, so the rope leaves it clear of the card).
@@ -591,7 +586,7 @@ export default function LoginCanopyScene({ cardRef, reducedMotion, skipIntro = f
     // The backdrop with the banyan (trunk, branches, hanging roots) graded to the ZOVIVE bark palette (the original
     // painting is kept as forest-banyan-backdrop.png).
     loadTexture('/images/forest-banyan-backdrop-zovive.png', (texture) => {
-      if (texture) { backgroundMaterial.uniforms.map.value = texture; trunkMaterial.uniforms.map.value = texture; background.visible = true; trunkMatte.visible = true; }
+      if (texture) { backgroundMaterial.uniforms.map.value = texture; trunkMaterial.uniforms.map.value = texture; background.visible = true; trunkReady = true; }
       ready.bg = true;
     });
 
@@ -804,51 +799,6 @@ export default function LoginCanopyScene({ cardRef, reducedMotion, skipIntro = f
         carabiner.rotation.set(0, 0, 0);
       } else carabiner.visible = false;
     }
-    // The limb on the trunk (static for a layout): a tapered bark tube that flares where it grows out of the trunk, with
-    // knots, a moss strip along its top, its soft shadow on the forest behind, a mossy twig and two rootlets under it.
-    const limbRadius = (limb, t) => {
-      const base = limb.r0 + (limb.r1 - limb.r0) * Math.pow(t, 0.8);
-      const flare = 1 + 0.55 * (1 - smoothstep(0, 0.16, t));
-      const knots = 0.12 * Math.exp(-(((t - 0.36) / 0.03) ** 2)) + 0.09 * Math.exp(-(((t - 0.68) / 0.025) ** 2));
-      const tip = t > 0.975 ? 1 - ((t - 0.975) / 0.025) * 0.55 : 1;
-      return base * (flare + knots) * tip;
-    };
-    function drawLimb(limb, S) {
-      if (!limb) { limbMesh.visible = false; limbShadow.visible = false; limbMoss.visible = false; limbTwigs.forEach((tw) => { tw.mesh.visible = false; }); return; }
-      const n = Math.min(limb.pts.length, limbBuf.length);
-      for (let i = 0; i < n; i += 1) { limbBuf[i].x = limb.pts[i][0]; limbBuf[i].y = limb.pts[i][1]; }
-      const path = limbPath.build(limbBuf, n), L = path.total;
-      // a level limb (tablet / phone) shows more of its shaded underside than the sloping desktop one: lift it so its
-      // rendered bark matches the painted trunk and roots at every size
-      const lean = Math.abs((limb.pts[n - 1][1] - limb.pts[0][1]) / ((limb.pts[n - 1][0] - limb.pts[0][0]) || 1));
-      const lift = 1 + 0.2 * (1 - smoothstep(0.1, 0.35, lean));
-      writeTube(limbMesh, (t, o) => {
-        path.at(t * L, tmpP);
-        o.x = wx(tmpP.x); o.y = wy(tmpP.y); o.r = wr(limbRadius(limb, t)); o.v = (t * L) / (limb.r0 * 11);   // same bark proportions as the roots
-        // a little darker and greener where it leaves the shaded trunk, as the painting's limbs are
-        // the same bark as the roots, a little darker where it leaves the shaded trunk
-        const d = 0.8 + 0.2 * smoothstep(0, 0.5, t); o.cr = d * lift * LIMB_TINT[0]; o.cg = d * lift * LIMB_TINT[1]; o.cb = d * lift * LIMB_TINT[2];
-      });
-      writeTube(limbShadow, (t, o) => {
-        path.at(t * L, tmpP); const r = limbRadius(limb, t);
-        o.x = wx(tmpP.x + 0.3 * r); o.y = wy(tmpP.y + 0.75 * r); o.r = wr(r * 1.25); o.v = 0;
-      });
-      writeTube(limbMoss, (t, o) => {
-        const tt = 0.1 + 0.55 * t; path.at(tt * L, tmpP); const r = limbRadius(limb, tt);
-        // along its top: offset towards "up" across the path (the side facing the sky)
-        let nx = tmpP.ty, ny = -tmpP.tx; if (ny > 0) { nx = -nx; ny = -ny; }
-        // thin broken patches hugging the top edge (not one continuous ribbon), the bark map at the limb's scale
-        const patch = Math.max(0, 0.15 + 0.85 * Math.sin(t * 19 + 1.3) * Math.sin(t * 7.1 + 0.4));
-        o.x = wx(tmpP.x + nx * 0.82 * r); o.y = wy(tmpP.y + ny * 0.82 * r); o.r = wr(r * 0.2 * Math.sin(Math.PI * t) * patch + 0.2); o.v = (tt * L) / (limb.r0 * 11);
-      });
-      limbMesh.visible = true; limbShadow.visible = true; limbMoss.visible = true;
-      limbTwigs.forEach((tw, i) => {
-        path.at(tw.at * L, cP);
-        const bx = cP.x, by = cP.y + limbRadius(limb, tw.at) * 0.7, len = tw.len * S, sway = i === 1 ? -0.3 : 0.2;
-        writeTube(tw.mesh, (t, o) => { o.x = wx(bx + sway * len * t * t); o.y = wy(by + len * t); o.r = wr(Math.max(0.6, 0.012 * S * (1 - 0.7 * t))); o.v = t * 2; });
-        tw.mesh.visible = true;
-      });
-    }
 
     // ------------------------------------------------------------ the card's position
     let appliedCard = { dx: null, dy: null };
@@ -1039,10 +989,10 @@ export default function LoginCanopyScene({ cardRef, reducedMotion, skipIntro = f
       actorState.harness = [sx(vC.x), sy(vC.y)];
     }
     function drawShadows(desc, stage, cardOff) {
-      if (desc && actor && desc.limbFeet) {
-        // Boots on the limb: a soft contact shadow on the bark under them.
+      if (desc && actor && desc.treeFeet) {
+        // Boots on the banyan root: a soft contact shadow on the bark under them.
         contactShadow.visible = true; legShadow.visible = false;
-        contactShadow.position.set(wx(desc.limbFeet[0]), wy(desc.limbFeet[1] + 0.004 * stage.S), -0.6);
+        contactShadow.position.set(wx(desc.treeFeet[0]), wy(desc.treeFeet[1] + 0.004 * stage.S), -0.6);
         contactShadow.scale.set(wr(0.26 * stage.S), wr(0.045 * stage.S), 1);
         shadowMaterial.opacity = 0.32;
         return;
@@ -1117,9 +1067,9 @@ export default function LoginCanopyScene({ cardRef, reducedMotion, skipIntro = f
       driveActor(frame.actor, stage, frame, fdt);
       drawShadows(frame.actor, stage, frame.card);
       drawRope(frame.rope, stage.S, actorState.harness, actorState.k);
-      drawLimb(frame.limb, stage.S);
       // Once the rope is gone (a quarter second after it comes off her, or the intro skipped) her hip coil goes too.
       if (ropeCoil.length && ropeCoilShown === !!frame.ropeGone) { ropeCoilShown = !frame.ropeGone; ropeCoil.forEach((m) => { m.visible = ropeCoilShown; }); }
+      trunkMatte.visible = trunkReady && !!frame.trunkOver;
       // The trunk is never drawn over the card.
       const c = stage.card;
       trunkMaterial.uniforms.uCard.value.set(c.left + frame.card.dx, c.top + frame.card.dy, c.right + frame.card.dx, c.bottom + frame.card.dy);
@@ -1164,7 +1114,7 @@ export default function LoginCanopyScene({ cardRef, reducedMotion, skipIntro = f
       const field = cardRef.current?.querySelector('.auth-field');
       const inputTop = field ? field.getBoundingClientRect().top - world.top - card.shiftY : undefined;
       const box = { left: card.left, top: card.top, right: card.right, bottom: card.bottom };
-      const stage = computeStage({ W: world.W, H: world.H, card: box, blocked: measureBlocked(card), inputTop, trunk: trunkOnScreen(), branch: onScreen(BRANCH_UNDERSIDE) });
+      const stage = computeStage({ W: world.W, H: world.H, card: box, blocked: measureBlocked(card), inputTop, trunk: trunkOnScreen(), branch: onScreen(BRANCH_UNDERSIDE), rootPath: onScreen(TREE_ROOT_TOP) });
       // The intro starts from wherever the page put the card; if it is already home (the scene arrived late or the form
       // was used first) there is no tow this time.
       if (!intro && stage.offset) stage.offset = Math.abs(card.shiftX) < 1 && Math.abs(card.shiftY) < 1 ? { dx: 0, dy: 0 } : { dx: card.shiftX, dy: card.shiftY };
