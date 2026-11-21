@@ -63,5 +63,6 @@ public class InitialAdminBootstrap implements CommandLineRunner {
         admin.setRole(UserRole.ADMIN);
         admin.setEnabled(true);
         users.save(admin);
+        log.info("Initial administrator account created successfully.");
     }
 }
